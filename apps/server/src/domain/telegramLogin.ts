@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { sql } from '../db';
 import type { Env } from './codeChannel';
 import { DomainError } from './errors';
+import { limit } from './flood';
 import { botApi } from './telegramBot';
 
 /**
@@ -27,13 +28,16 @@ export const telegramLoginEnabled = (env: Env = process.env): boolean =>
 /** Начало входа: токен для ссылки на бота. В базе — только хэш; ключ устройства — чтобы забрать вход могло только оно. */
 export async function createTelegramLogin(ip: string | null, deviceKey: Uint8Array | null, env: Env = process.env): Promise<{ token: string; url: string; expiresAt: string }> {
   if (!telegramLoginEnabled(env)) throw new DomainError('telegram_unavailable');
+  // всплеск с адреса и бюджет сервера в час (domain/flood.ts); часовой лимит на адрес — ниже, в транзакции
+  if (ip) await limit('telegramIp', ip);
+  await limit('telegramGlobal', '*');
   const token = randomBytes(32).toString('base64url');
   await sql`delete from telegram_logins where expires_at < now() - interval '1 day'`;
   const expiresAt = await sql.begin(async (tx) => {
     if (ip) {
       await tx`select pg_advisory_xact_lock(hashtext(${'tg-ip:' + ip}))`;
-      const [{ n }] = await tx`select count(*)::int as n from telegram_logins where ip = ${ip} and created_at > now() - interval '1 hour'`;
-      if (n >= MAX_PER_IP_HOUR) throw new DomainError('flood');
+      const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from telegram_logins where ip = ${ip} and created_at > now() - interval '1 hour'`;
+      if (n >= MAX_PER_IP_HOUR) throw new DomainError('flood', 'telegram ip', wait);
     }
     const [r] = await tx`
       insert into telegram_logins (id, token_hash, device_key, ip, expires_at)

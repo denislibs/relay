@@ -10,6 +10,7 @@ import { audioConstraints, failureOf, videoConstraints } from './media';
 import { blurProcessor } from './background';
 import type { NetLevel } from './quality';
 import { soundSink, sounds } from './sounds';
+import { floodText, floodWait } from '../flood';
 
 /**
  * Групповой звонок на странице (docs/plans/2026-11-07-relay-group-calls.md). Медиа — комната LiveKit (livekit-client,
@@ -131,7 +132,7 @@ function callHash(hash: string): void {
 export async function startConference(invite: number[], fromCall?: string): Promise<void> {
   let r: { callId: string };
   try { r = await send({ op: 'groupCallConference', invite, ...(fromCall ? { fromCall } : {}) }) as { callId: string }; }
-  catch { toast('Не удалось начать групповой звонок'); return; }
+  catch (e) { toast(floodWait(e) != null ? floodText(floodWait(e), 'Слишком много звонков') : 'Не удалось начать групповой звонок'); return; }
   await joinGroupCall(0, r.callId, { moving: !!fromCall });
 }
 
@@ -142,7 +143,7 @@ export async function inviteToGroupCall(users: number[]): Promise<void> {
   try {
     const r = await send({ op: 'groupCallInvite', callId: a.view.callId, users }) as { invited: number[] };
     toast(r.invited.length === users.length ? 'Приглашения отправлены' : r.invited.length ? 'Позвали не всех: кто-то не принимает звонки' : 'Этим людям нельзя позвонить');
-  } catch { toast('Не удалось позвать'); }
+  } catch (e) { toast(floodWait(e) != null ? floodText(floodWait(e), 'Слишком много приглашений') : 'Не удалось позвать'); }
 }
 
 /** Принять или отклонить приглашение в звонок без группы. */
@@ -216,7 +217,7 @@ export async function decideRequest(userId: number, approve: boolean): Promise<v
 export async function startGroupCall(chatId: number): Promise<void> {
   let r: { callId: string };
   try { r = await send({ op: 'groupCallStart', chatId }) as { callId: string }; }
-  catch (e) { toast(String((e as { code?: string })?.code ?? e).includes('forbidden') ? 'Начинать звонки в этой группе могут только администраторы' : 'Не удалось начать звонок'); return; }
+  catch (e) { toast(floodWait(e) != null ? floodText(floodWait(e), 'Слишком много звонков') : String((e as { code?: string })?.code ?? e).includes('forbidden') ? 'Начинать звонки в этой группе могут только администраторы' : 'Не удалось начать звонок'); return; }
   await joinGroupCall(chatId, r.callId);
 }
 
@@ -241,7 +242,7 @@ export async function joinGroupCall(chatId: number, callId: string, o: { moving?
   let j: { token: string; identity: string; epoch: number };
   joining = { callId, early: [] };
   try { j = await send({ op: 'groupCallJoin', callId, pub: mine.pub, muted: false, video: false }) as { token: string; identity: string; epoch: number }; }
-  catch { joining = null; release(); toast('Звонок уже закончился'); return; }
+  catch (e) { joining = null; release(); toast(floodWait(e) != null ? floodText(floodWait(e), 'Слишком много попыток войти') : 'Звонок уже закончился'); return; }
   const session = Number(/-s(\d+)$/.exec(j.identity)?.[1] ?? 0);
   const keys = new SenderKeys();
   const room = new lk.Room({

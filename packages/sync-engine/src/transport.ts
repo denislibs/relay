@@ -153,6 +153,8 @@ export class WsTransport {
       this.dev?.log.record('engine', 'close', { code: (e as CloseEvent | undefined)?.code ?? null });
       this.h.onClose();
       if (!this.wanted || this.dev?.sim.offline) return;
+      // сервер закрыл за флуд (4008, antiflood) — сразу с самой долгой паузой, а не через четверть секунды
+      if ((e as CloseEvent | undefined)?.code === 4008) this.attempt = Math.max(this.attempt, 8);
       const base = Math.min(this.backoff[1], this.backoff[0] * 2 ** this.attempt++);
       const delay = Math.round(base * (0.75 + Math.random() * 0.5));
       this.nextDelay = delay;

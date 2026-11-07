@@ -4,6 +4,7 @@ import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { hit, key, PREFIX, valkey } from '../valkey';
 import { DomainError } from './errors';
+import { count } from './flood';
 import { serviceMessage } from './groups';
 import { canSee, privacyCtx } from './privacy';
 import { onlineUsers } from './liveRegistry';
@@ -25,7 +26,6 @@ export type Publish = (topic: string, msg: string) => void;
 const RING_TTL = Math.ceil(CALL_RING_MS / 1000) + 15;
 const LIVE_TTL = Math.ceil((CALL_PING_MS * 3) / 1000) + 10;   // три пропущенных подтверждения — звонок брошен
 const ENDED_TTL = 120;                                          // ended держим недолго: поздний кадр получит «звонок завершён»
-const REQUESTS_PER_MIN = 10;
 const SIGNALS_PER_SEC = 60;
 
 const run = (script: string, keys: string[], args: (string | number)[]) =>
@@ -118,7 +118,7 @@ export function iceServersFor(userId: number, now = Date.now(), env: Record<stri
 /** Звонок в личный чат. Отказ по приватности и блокировке — одинаковый «недоступен», без причины. */
 export async function requestCall(publish: Publish, userId: number, sessionId: number,
   f: { callId: string; chatId: number; video: boolean; commit: string; tab: string }): Promise<{ ok: true } | { ok: false; reason: 'unavailable' | 'in_call' | 'busy' | 'flood' }> {
-  if ((await hit(`callreq:${userId}`, 60)) > REQUESTS_PER_MIN) return { ok: false, reason: 'flood' };
+  if (await count('callRing', userId)) return { ok: false, reason: 'flood' };   // domain/flood.ts
   const [c] = await sql`
     select c.kind, o.user_id as peer, u.system
       from chats c

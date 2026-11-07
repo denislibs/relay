@@ -153,7 +153,7 @@ test('returning user: «Войти как …?» — confirm signs in to the exi
 
 test('rate limits: per address and per Telegram account', async () => {
   for (let i = 0; i < 20; i++) expect((await call('/auth/telegram', {})).status).toBe(200);
-  expect((await call('/auth/telegram', {})).json).toEqual({ code: 'flood' });
+  expect((await call('/auth/telegram', {})).json).toMatchObject({ code: 'flood', retryAfter: expect.any(Number) });
 
   await sql`truncate telegram_logins`;
   const tokens: string[] = [];

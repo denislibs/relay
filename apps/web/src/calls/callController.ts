@@ -8,6 +8,7 @@ import { soundSink, sounds, warmCallSounds } from './sounds';
 import { loadUnseenCalls, noteMissedCall } from './callsList';
 import { levelOf, sampleOf, smoother, videoCap, type NetLevel, type NetSample } from './quality';
 import { closeCallNotification, parseCallHash, showCallNotification, type CallIntent } from './callNotify';
+import { floodWait } from '../flood';
 
 /**
  * Звонок 1:1 на странице (docs/plans/2026-11-06-relay-calls.md). RTCPeerConnection в воркере нет, поэтому звонок
@@ -151,7 +152,7 @@ export async function startCall(chatId: number, peerId: number, video: boolean):
   a.commit = await commitOf(callId, a.mine.pub);
   let r: { ok: boolean; reason?: string };
   try { r = await send({ op: 'callRequest', callId, chatId, video, commit: a.commit, tab: TAB }) as { ok: boolean; reason?: string }; }
-  catch { return finish(a, 'offline', false); }
+  catch (e) { return finish(a, floodWait(e) != null ? 'flood' : 'offline', false); }
   if (a.ended) return;
   if (!r.ok) {
     if (r.reason === 'busy') sounds.busy(vol());
@@ -184,7 +185,7 @@ export async function acceptCall(withVideo: boolean): Promise<void> {
   a.pubB = a.mine.pub;
   let r: { ok: boolean; reason?: string };
   try { r = await send({ op: 'callAccept', callId: inc.callId, tab: TAB, pub: a.mine.pub }) as { ok: boolean; reason?: string }; }
-  catch { return finish(a, 'offline', false); }
+  catch (e) { return finish(a, floodWait(e) != null ? 'flood' : 'offline', false); }
   if (!r.ok) return finish(a, r.reason === 'in_call' ? 'in_call' : 'gone', false);
   armConnectTimeout(a);
 }
