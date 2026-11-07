@@ -1,11 +1,14 @@
 import { expect, test } from 'bun:test';
-import { folderError, graphemes, nextFolderId, normalizeFolder, normalizeFolders } from './folders';
+import { FOLDER_COLORS, folderError, graphemes, nextFolderId, normalizeFolder, normalizeFolders } from './folders';
 
 const base = { id: 2, title: 'Работа', include: [5], exclude: [] };
 
 test('normalize drops junk, dedupes ids and keeps a chat only in include when it is in both', () => {
   expect(normalizeFolder({ ...base, include: [5, 5, -1, 1.5, 'x', 7], exclude: [7, 8, 8], extra: 1, contacts: 'yes', title: '  Мои   чаты ' }))
-    .toEqual({ id: 2, title: 'Мои чаты', emoji: null, include: [5, 7], exclude: [8], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false });
+    .toEqual({ id: 2, title: 'Мои чаты', emoji: null, color: null, include: [5, 7], exclude: [8], contacts: false, nonContacts: false, groups: false, excludeMuted: false, excludeRead: false });
+  // цвет тега — индекс палитры 0…FOLDER_COLORS-1, остальное сбрасывается в «без тега»
+  expect(normalizeFolder({ ...base, color: 3 })!.color).toBe(3);
+  for (const color of [-1, 1.5, FOLDER_COLORS, '2', null]) expect(normalizeFolder({ ...base, color })!.color).toBeNull();
   expect(normalizeFolder({ ...base, id: 1 })).toBeNull();
   expect(normalizeFolder({ ...base, id: 0 })).toBeNull();
   expect(normalizeFolder(null)).toBeNull();
