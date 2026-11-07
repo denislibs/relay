@@ -39,7 +39,7 @@ export interface Prefs {
   folders: { position: 'top' | 'left' };   // вкладки папок: полосой над списком или колонкой слева
   /** звонки на этом устройстве: выбранные микрофон/динамик/камера (null — системные), обработка звука, качество видео,
    *  принимать ли звонки здесь, мелодия и громкость звонка */
-  calls: { mic: string | null; speaker: string | null; camera: string | null; noise: boolean; agc: boolean; video: 'auto' | 'saver' | 'high'; accept: boolean; ringtone: string; volume: number };
+  calls: { mic: string | null; speaker: string | null; camera: string | null; noise: boolean; agc: boolean; video: 'auto' | 'saver' | 'high'; accept: boolean; ringtone: string; volume: number; background: 'none' | 'blur' };
 }
 
 export interface KV { getItem(k: string): string | null; setItem(k: string, v: string): void; removeItem(k: string): void }
@@ -70,7 +70,7 @@ export function defaultPrefs(reduced = false): Prefs {
     dev: { enabled: false },
     bigEmoji: true,
     folders: { position: 'top' },
-    calls: { mic: null, speaker: null, camera: null, noise: true, agc: true, video: 'auto', accept: true, ringtone: 'classic', volume: 0.8 },
+    calls: { mic: null, speaker: null, camera: null, noise: true, agc: true, video: 'auto', accept: true, ringtone: 'classic', volume: 0.8, background: 'none' },
   };
 }
 
@@ -133,6 +133,7 @@ function sanitize(src: Prefs, d: Prefs): Prefs {
   for (const k of ['mic', 'speaker', 'camera'] as const) { const v = p.calls[k] as unknown; if (!(typeof v === 'string' && v.length > 0 && v.length <= 256)) p.calls[k] = null; }
   if (!['auto', 'saver', 'high'].includes(p.calls.video)) p.calls.video = d.calls.video;
   if (!RINGTONES.includes(p.calls.ringtone)) p.calls.ringtone = d.calls.ringtone;
+  if (p.calls.background !== 'blur') p.calls.background = 'none';
   p.calls.volume = Math.min(1, Math.max(0, num(p.calls.volume, d.calls.volume)));
   for (const t of BASES) {
     const c0 = p.themes[t];

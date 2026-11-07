@@ -1,6 +1,6 @@
 import { Avatar, Icon, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { acceptCall, callStreams, declineCall, hangup, toggleCam, toggleMic, type CallView } from '../../calls/callController';
+import { acceptCall, callStreams, declineCall, hangup, setCallBackground, toggleCam, toggleMic, type CallView } from '../../calls/callController';
 import { callStatus } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
 import { CallPlate, useNow, usePeer } from './CallSlot';
@@ -31,6 +31,7 @@ export function CallLayer() {
 function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
   const peer = usePeer(v);
   const now = useNow(v.phase === 'active');
+  const bg = useGlobal((s) => s.prefs.calls.background);
   const remoteVideo = useRef<HTMLVideoElement>(null), localVideo = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const { local, remote } = callStreams();
@@ -77,6 +78,7 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
           </>
         ) : (
           <>
+            {v.cam ? <CallButton icon="blur" label={bg === 'blur' ? 'Обычный фон' : 'Размыть фон'} on={bg === 'blur'} disabled={ended} onClick={() => void setCallBackground(bg === 'blur' ? 'none' : 'blur')} /> : null}
             <CallButton icon={v.cam ? 'video' : 'videoOff'} label={v.cam ? 'Выключить камеру' : 'Включить камеру'} on={v.cam} disabled={ended} onClick={() => void toggleCam()} />
             <CallButton icon={v.mic ? 'mic' : 'micOff'} label={v.mic ? 'Выключить микрофон' : 'Включить микрофон'} on={v.mic} disabled={ended} onClick={toggleMic} />
             <CallButton icon="phoneDown" label="Завершить" danger disabled={ended} onClick={hangup} />

@@ -1,7 +1,7 @@
 import { CALL_PING_MS, type CallEndReason, type CallInfo, type IceServer } from '@relay/protocol';
 import type { CallEvent } from '@relay/sync-engine/src/engine';
 import { getGlobal, setGlobal } from '../global';
-import { getPrefs } from '../prefs';
+import { getPrefs, setPref } from '../prefs';
 import { CallCryptoError, commitOf, deriveSession, ephemeral, type Ephemeral, type Session } from './callCrypto';
 import { failureOf, getCamera, getMic, stopStream, VIDEO_BITRATE } from './media';
 import { soundSink, sounds, warmCallSounds } from './sounds';
@@ -299,6 +299,15 @@ export async function switchDevice(kind: 'mic' | 'camera' | 'speaker'): Promise<
     a.cam = track; a.local.addTrack(track);
     view({ rev: a.view.rev + 1 });
   }
+}
+
+/** «Размыть фон» в звонке: настройка сразу и для следующих звонков; камера включена — новая дорожка на лету. */
+export async function setCallBackground(mode: 'none' | 'blur'): Promise<void> {
+  setPref('calls.background', mode);
+  const a = cur;
+  if (!a || a.ended || !a.cam) return;
+  try { await switchDevice('camera'); }
+  catch (e) { failToast(mediaText(failureOf(e), 'camera')); }
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -703,6 +712,7 @@ function mediaText(f: ReturnType<typeof failureOf>, what: 'mic' | 'camera'): str
   if (f === 'missing') return what === 'mic' ? 'Микрофон не найден' : 'Камера не найдена';
   if (f === 'busy') return what === 'mic' ? 'Микрофон занят другим приложением' : 'Камера занята другим приложением';
   if (f === 'insecure') return 'Звонки работают только по защищённому соединению';
+  if (f === 'blur') return 'Не удалось размыть фон — камера не включена';
   return what === 'mic' ? 'Не удалось включить микрофон' : 'Не удалось включить камеру';
 }
 

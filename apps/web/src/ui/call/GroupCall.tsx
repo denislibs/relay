@@ -2,7 +2,7 @@ import type { GroupCallSummary, ProfilePhoto } from '@relay/protocol';
 import { Avatar, Icon, peerTone, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  adminGroupAction, endGroupCallForAll, groupTracks, joinGroupCall, leaveGroupCall, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
+  adminGroupAction, endGroupCallForAll, groupTracks, joinGroupCall, leaveGroupCall, setGroupBackground, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
   type GroupCallView, type GroupMemberView,
 } from '../../calls/groupCall';
 import { callClock } from '../../calls/callText';
@@ -98,6 +98,7 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
   const [list, setList] = useState(true);
   const [pinned, setPinned] = useState<string | null>(null);
   const [hint, setHint] = useState(false);
+  const bg = useGlobal((s) => s.prefs.calls.background);
   const title = (chat?.title as string) || 'Группа';
   const tiles = pinned ? v.members.filter((m) => m.identity === pinned) : v.members;
   const cols = tiles.length <= 1 ? 1 : tiles.length <= 4 ? 2 : 3;
@@ -133,6 +134,7 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
         ) : null}
       </div>
       <div class="app-call-controls">
+        {v.cam ? <Btn icon="blur" label={bg === 'blur' ? 'Обычный фон' : 'Размыть фон'} on={bg === 'blur'} onClick={() => void setGroupBackground(bg === 'blur' ? 'none' : 'blur')} /> : null}
         <Btn icon={v.cam ? 'video' : 'videoOff'} label={v.cam ? 'Камера' : 'Камера выкл.'} on={v.cam} onClick={() => void toggleGroupCam()} />
         <Btn icon={v.mic ? 'mic' : 'micOff'} label={v.mutedByAdmin && !v.mic ? 'Выключен админом' : v.mic ? 'Микрофон' : 'Микрофон выкл.'} on={v.mic} onClick={() => void toggleGroupMic()} />
         {typeof navigator !== 'undefined' && navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices

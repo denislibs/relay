@@ -1,4 +1,5 @@
 import type { Prefs } from '../prefs';
+import { blurredCamera } from './background';
 
 /**
  * Микрофон и камера для звонка и страницы настроек. Сохранённое устройство пропало (отключили) — берём системное
@@ -29,7 +30,7 @@ export const videoConstraints = (p: CallPrefs, withDevice = true, facing?: 'user
   ...VIDEO[p.video],
 });
 
-export type MediaFailure = 'denied' | 'missing' | 'busy' | 'insecure' | 'unknown';
+export type MediaFailure = 'denied' | 'missing' | 'busy' | 'insecure' | 'blur' | 'unknown';
 
 export function failureOf(e: unknown): MediaFailure {
   const name = (e as { name?: string })?.name;
@@ -37,6 +38,7 @@ export function failureOf(e: unknown): MediaFailure {
   if (name === 'NotAllowedError' || name === 'SecurityError') return 'denied';
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'missing';
   if (name === 'NotReadableError' || name === 'AbortError') return 'busy';
+  if (name === 'BlurError') return 'blur';
   return 'unknown';
 }
 
@@ -56,7 +58,18 @@ async function grab(kind: 'audio' | 'video', p: CallPrefs): Promise<{ track: Med
 }
 
 export async function getMic(p: CallPrefs) { return grab('audio', p); }
-export async function getCamera(p: CallPrefs) { return grab('video', p); }
+/** Камера; «Размыть фон» — уже размытая дорожка (background.ts). Размыть не вышло — камера не включается вовсе:
+ *  человек выбрал скрыть фон, показать его без спроса нельзя. */
+export async function getCamera(p: CallPrefs) {
+  const r = await grab('video', p);
+  if (p.background !== 'blur') return r;
+  try { return { ...r, track: await blurredCamera(r.track) }; }
+  catch (e) {
+    r.track.stop();
+    console.warn('background blur:', e);
+    throw Object.assign(new Error('blur'), { name: 'BlurError' });
+  }
+}
 
 export function stopStream(s: MediaStream | null | undefined): void {
   for (const t of s?.getTracks() ?? []) t.stop();

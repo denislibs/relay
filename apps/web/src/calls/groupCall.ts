@@ -2,10 +2,11 @@ import { GROUP_CALL_PING_MS, type GroupCallMember } from '@relay/protocol';
 import type { CallEvent } from '@relay/sync-engine/src/engine';
 import { asset } from '../assets';
 import { getGlobal, setGlobal } from '../global';
-import { getPrefs } from '../prefs';
+import { getPrefs, setPref } from '../prefs';
 import { ephemeral, type Ephemeral } from './callCrypto';
 import { membersEmoji, openSenderKey, sealSenderKey, senderKey } from './groupCrypto';
 import { audioConstraints, failureOf, videoConstraints } from './media';
+import { blurProcessor } from './background';
 import { sounds } from './sounds';
 
 /**
@@ -178,10 +179,37 @@ export async function toggleGroupCam(): Promise<void> {
   const a = cur;
   if (!a) return;
   const on = !a.view.cam;
-  try { await a.room.localParticipant.setCameraEnabled(on, on ? videoConstraints(getPrefs().calls) as never : undefined); }
-  catch (e) { toast(failureOf(e) === 'denied' ? 'Нет доступа к камере' : 'Не удалось включить камеру'); return; }
+  try {
+    await a.room.localParticipant.setCameraEnabled(on, on ? videoConstraints(getPrefs().calls) as never : undefined);
+    if (on) await applyBackground(a);
+  } catch (e) {
+    if (on) await a.room.localParticipant.setCameraEnabled(false).catch(() => {});   // фон не скрылся — камеру не показываем
+    toast(failureOf(e) === 'denied' ? 'Нет доступа к камере' : failureOf(e) === 'blur' ? 'Не удалось размыть фон — камера не включена' : 'Не удалось включить камеру');
+    return;
+  }
   view({ cam: on, rev: a.view.rev + 1 });
   pushState(a);
+}
+
+/** «Размыть фон» (настройка calls.background): обработчик на дорожке камеры LiveKit — до того, как кадры уйдут. */
+async function applyBackground(a: Active): Promise<void> {
+  const track = a.room.localParticipant.getTrackPublication(a.lk.Track.Source.Camera)?.videoTrack;
+  if (!track) return;
+  const want = getPrefs().calls.background === 'blur';
+  const has = track.getProcessor()?.name === 'relay-blur';
+  try {
+    if (want && !has) await track.setProcessor(blurProcessor() as never);
+    else if (!want && has) await track.stopProcessor();
+  } catch (e) { console.warn('background blur:', e); throw Object.assign(new Error('blur'), { name: 'BlurError' }); }
+}
+
+/** Переключатель фона в групповом звонке: настройка сразу и для следующих звонков. */
+export async function setGroupBackground(mode: 'none' | 'blur'): Promise<void> {
+  setPref('calls.background', mode);
+  const a = cur;
+  if (!a || !a.view.cam) return;
+  try { await applyBackground(a); }
+  catch { await toggleGroupCam(); toast('Не удалось размыть фон — камера выключена'); }
 }
 
 export async function toggleGroupScreen(): Promise<void> {

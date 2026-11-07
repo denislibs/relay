@@ -76,6 +76,7 @@ export const ENTRIES: E[] = [
 
   // ---------- Уведомления ----------
   { id: 'calls', path: 'settings/calls', title: 'Звонки', kind: 'section', icon: 'phone', tile: 'green', keywords: ['микрофон', 'камера', 'динамики', 'звук звонка', 'мелодия', 'видео'] },
+  { id: 'calls.background', path: 'settings/calls', title: 'Фон', kind: 'row', keywords: ['размыть фон', 'размытие', 'фон камеры'] },
   { id: 'calls.accept', path: 'settings/calls', title: 'Принимать звонки на этом устройстве', kind: 'row', keywords: ['входящие звонки'] },
   { id: 'notifications', path: NOTIFY, title: 'Уведомления', kind: 'section', icon: 'bell', tile: 'red', keywords: ['оповещения', 'пуш', 'push'] },
   { id: 'notifications.web', path: NOTIFY, title: 'В браузере', kind: 'subsection' },
