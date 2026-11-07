@@ -1,5 +1,6 @@
 import { bindGroupCalls } from './calls/groupCall';
 import { bindCalls, bindCallToast } from './calls/callController';
+import { bindCallPlans } from './calls/callPlans';
 import { bindStickers } from './stickers';
 import { bindGifs, gifsRevChanged } from './gifs';
 import { deviceStore, forgetAttachments } from './mediaCache';
@@ -64,6 +65,12 @@ export function startData(me: Me, fromUrl = true): void {
   engine.onReload(() => location.reload());
   bindCallToast(showToast);
   bindCalls({ userId: me.userId, send: (frame) => engine.call({ type: 'callFrame', frame: frame as never }), onCall: (cb) => engine.onCall(cb) });
+  // запланированный звонок: в срок — уведомление (вкладка скрыта) или сообщение внизу (calls/callPlans.ts)
+  bindCallPlans((chatId, title, body) => {
+    if (document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted' && navigator.serviceWorker) {
+      void navigator.serviceWorker.ready.then((reg) => reg.showNotification(title, { body, tag: 'plan-' + chatId, data: { chatId } })).catch(() => {});
+    } else showToast(`${title}: ${body}`);
+  });
   bindGroupCalls({ userId: me.userId, send: (frame) => engine.call({ type: 'callFrame', frame: frame as never }), onCall: (cb) => engine.onCall(cb), toast: showToast });
   // движок уже открыт ранним стартом из boot.js (early.ts) — его порт больше не нужен
   void engine.ready.then(() => (self as unknown as { __relayEarly?: { close(): void } }).__relayEarly?.close());

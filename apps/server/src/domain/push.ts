@@ -238,3 +238,21 @@ export async function deliverPush(endpoint: string, push: PushPayload, ttlSec = 
   if (res.status === 429 || res.status >= 500) throw new Error(`push service ${res.status}`);
   if (!res.ok) throw new PermanentError(`push service ${res.status}`);
 }
+
+/** Напоминание о запланированном звонке (задача groupcall.remind): подписки тех, кто нажал «Напомнить», без живых
+ *  вкладок (открытая вкладка напоминает сама по времени плана). */
+export async function planReminderPush(chatId: number, users: number[], callTitle: string | null): Promise<{ endpoint: string; push: PushPayload }[]> {
+  if (!users.length) return [];
+  const online = await onlineUsers(users);
+  const off = users.filter((u) => !online.has(u));
+  if (!off.length) return [];
+  const [c] = await sql`select title from chats where id = ${chatId}`;
+  const rows = await sql`
+    select s.endpoint, s.hide_text from push_subscriptions s
+      join sessions se on se.id = s.session_id
+      left join user_settings us on us.user_id = s.user_id
+     where s.user_id = any(${off}::bigint[]) and se.expires_at > now()
+       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))`;
+  const body = callTitle ? `Начинается звонок «${callTitle}»` : 'Начинается звонок';
+  return rows.map((s) => ({ endpoint: s.endpoint as string, push: s.hide_text === true ? { chatId, id: 0, title: 'Relay', body: 'Начинается звонок' } : { chatId, id: 0, title: String(c?.title ?? 'Группа'), body } }));
+}

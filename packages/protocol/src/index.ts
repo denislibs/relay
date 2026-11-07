@@ -399,7 +399,7 @@ export type Update =
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
   | { type: 'chatAutoDelete'; chatId: Id; sec: number | null }   // срок автоудаления чата сменился (null — выключено)
-  | { type: 'groupCall'; chatId: Id; call: GroupCallSummary | null }   // в группе идёт звонок (плашка «Идёт звонок»), null — закончился
+  | { type: 'groupCall'; chatId: Id; call: GroupCallSummary | null; plan?: import('./groupCalls').GroupCallPlan | null }   // в группе идёт звонок (плашка «Идёт звонок»), null — закончился
   | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
   /** Подчат «Избранного» изменился: итоги владельцу (count 0 — исчез). Содержимого нет: последнее — по lastId из кэша или страницей. */
   | { type: 'savedDialog'; chatId: Id; peer: string; count: number; lastId: number | null; pinnedAt: number | null; dialogs: number; messages: number }

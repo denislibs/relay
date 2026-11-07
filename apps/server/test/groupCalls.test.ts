@@ -229,3 +229,46 @@ test('raised hand → the admin allows speaking; strangers cannot', async () => 
   expect((await freed).members.find((m) => m.userId === b.userId)?.mutedOnJoin).toBeUndefined();
   wa.close(); wb.close();
 });
+
+test('scheduled call: admin plans it (history line, banner plan), members toggle the reminder, the reminder job picks them, start takes the title and drops the plan', async () => {
+  const { planReminders, expireGroupCallPlan } = await import('../src/domain/groupCalls');
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const g = await chat(a, 'group', [a.userId, b.userId, c.userId]);
+  await own(g, a.userId);
+  const http = (l: Login, method: string, path: string, body?: unknown) => fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${l.token}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const at = Date.now() + 3600_000;
+  expect((await http(b, 'POST', `/groups/${g}/call-plan`, { title: 'Созвон', at })).status).toBe(403);
+  expect((await http(a, 'POST', `/groups/${g}/call-plan`, { title: 'Созвон', at: Date.now() + 1000 })).status).toBe(400);   // слишком скоро
+  const plan = await (await http(a, 'POST', `/groups/${g}/call-plan`, { title: '  Созвон   по   пятницам ', at })).json();
+  expect(plan).toMatchObject({ title: 'Созвон по пятницам', at, by: a.userId });
+  expect((await service(g)).at(-1)).toMatchObject({ sender: a.userId, state: 'scheduled', at, title: 'Созвон по пятницам' });
+  expect((await chatEventsOf(g, 'groupCall' as never)).at(-1)).toMatchObject({ call: null, plan: { id: plan.id, at } });
+  expect(await (await http(b, 'GET', `/groups/${g}/call-plan`)).json()).toEqual({ plan, remind: false });
+  expect(await (await http(b, 'POST', `/groups/${g}/call-plan/remind`, { on: true })).json()).toEqual({ remind: true });
+  expect((await (await http(a, 'GET', `/groups/${g}/call-plan`)).json()).remind).toBe(true);   // поставивший — сразу в напоминаемых
+  expect((await planReminders(plan.id))?.users.sort()).toEqual([a.userId, b.userId].sort());
+  // список чатов — с планом
+  const list = await (await http(c, 'GET', '/chats')).json() as { id: number; groupCallPlan?: unknown }[];
+  expect(list.find((x) => x.id === g)?.groupCallPlan).toMatchObject({ id: plan.id });
+
+  // начали звонок — название от плана, плана больше нет
+  const wa = await connect(a.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  expect((await call(wa, { op: 'groupCallGet', chatId: g })).call).toMatchObject({ callId, title: 'Созвон по пятницам' });
+  expect(await (await http(b, 'GET', `/groups/${g}/call-plan`)).json()).toEqual({ plan: null, remind: false });
+  expect(await planReminders(plan.id)).toBeNull();
+  // название идущего — админ меняет
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  const renamed = nextFrame(wa, (f) => f.op === 'groupCallState' && f.title === 'Планёрка');
+  await call(wa, { op: 'groupCallSettings', callId, title: 'Планёрка' });
+  await renamed;
+
+  // снятие и истечение
+  await call(wa, { op: 'groupCallEnd', callId });
+  const p2 = await (await http(a, 'POST', `/groups/${g}/call-plan`, { at })).json();
+  expect(p2.title).toBeNull();
+  expect((await http(b, 'DELETE', `/groups/${g}/call-plan`)).status).toBe(403);
+  await expireGroupCallPlan(p2.id);
+  expect((await (await http(a, 'GET', `/groups/${g}/call-plan`)).json()).plan).toBeNull();
+  wa.close();
+});

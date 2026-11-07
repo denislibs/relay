@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "sources": ["../../../packages/sync-engine/src/hosts/shared.worker.ts"],
+  "sourcesContent": [
+    "/// <reference lib=\"webworker\" />\n// Точка входа SharedWorker: один движок на все вкладки origin.\nimport { Engine } from '../engine';\nimport { fromMessagePort, HostCore, type FromHost, type ToHost } from '../host-core';\n\nconst scope = self as unknown as { name: string; onconnect: ((e: MessageEvent) => void) | null };\nconst build = scope.name.split('@')[1] ?? 'dev';\nconst core = new HostCore({ build, open: (cfg) => Engine.open(cfg) });\n\nscope.onconnect = (e) => { core.attach(fromMessagePort<ToHost, FromHost>(e.ports[0])); };\n// вкладки шлют ping раз в 10 с; молчащие 30 с считаются закрытыми (у MessagePort нет события close)\nsetInterval(() => core.sweep(30_000), 10_000);\n"
+  ],
+  "mappings": ";;;;;;;;;AAKA,IAAM,QAAQ;AACd,IAAM,QAAQ,MAAM,KAAK,MAAM,GAAG,EAAE,MAAM;AAC1C,IAAM,OAAO,IAAI,SAAS,EAAE,OAAO,MAAM,CAAC,QAAQ,OAAO,KAAK,GAAG,EAAE,CAAC;AAEpE,MAAM,YAAY,CAAC,MAAM;AAAA,EAAE,KAAK,OAAO,gBAAkC,EAAE,MAAM,EAAE,CAAC;AAAA;AAEpF,YAAY,MAAM,KAAK,MAAM,KAAM,GAAG,GAAM;",
+  "debugId": "98E84A9040831B9B64756E2164756E21",
+  "names": []
+}

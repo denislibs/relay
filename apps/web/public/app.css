@@ -1927,3 +1927,9 @@ span.app-log-ava { cursor: default; }
 .app-gcall-chat-form input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: rgba(255,255,255,.12); color: inherit; font: 400 14px/20px var(--font-sans); }
 .app-gcall-chat-form button { width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; cursor: pointer; }
 .app-gcall-chat-form button:disabled { opacity: .4; cursor: default; }
+
+/* запланированный звонок (этап 7): плашка, окно, название звонка у админа */
+.app-gcplan-icon { display: grid; place-items: center; width: 22px; height: 22px; color: #fff; }
+.app-gcplan-remind.is-on { opacity: .75; }
+.app-callplan-note { margin: 12px 0 0; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-gcall-titleedit { height: 34px; margin-bottom: 4px; padding: 0 10px; border: 0; border-radius: 10px; background: rgba(255,255,255,.08); color: inherit; font: 400 13px/18px var(--font-sans); }

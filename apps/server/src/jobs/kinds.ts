@@ -4,7 +4,7 @@ import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
-import { deliverPush, planCallPush, planPush, planPushPage, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
+import { deliverPush, planCallPush, planPush, planPushPage, planReminderPush, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
@@ -24,7 +24,7 @@ import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 import { trimAdminLog } from '../domain/adminLog';
 import { expireRing } from '../domain/calls';
 import { CALL_RING_MS } from '@relay/protocol';
-import { checkGroupCall } from '../domain/groupCalls';
+import { checkGroupCall, expireGroupCallPlan, planReminders } from '../domain/groupCalls';
 import { publishTopic } from '../bus';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
@@ -272,6 +272,16 @@ register('push.call', async (p: { callId: string; chatId: number; caller: number
   const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, ttl)));
   for (const r of res) if (r.status === 'rejected') console.warn('push.call:', r.reason);
 });
+
+// запланированный звонок: в срок — пуш напомнить (кто нажал «Напомнить» и без вкладок); не начатый — снять (groupCalls.ts)
+register('groupcall.remind', async (p: { planId: string }) => {
+  const r = await planReminders(String(p.planId));
+  if (!r) return;
+  const targets = await planReminderPush(r.chatId, r.users, r.title);
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, 3600)));
+  for (const x of res) if (x.status === 'rejected') console.warn('groupcall.remind:', x.reason);
+});
+register('groupcall.planExpire', async (p: { planId: string }) => expireGroupCallPlan(String(p.planId)));
 
 // групповой звонок: ушедшие без пинга — из состава, пустой — завершить (domain/groupCalls.ts)
 register('groupcall.check', async (p: { callId: string }) => checkGroupCall(publishTopic, String(p.callId)));

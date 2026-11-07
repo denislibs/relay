@@ -6,6 +6,7 @@ import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
 import { declineFromPush } from './domain/calls';
 import { listCalls, markCallsSeen, unseenMissed } from './domain/callsList';
+import { cancelGroupCallPlan, getGroupCallPlan, planGroupCall, remindGroupCallPlan } from './domain/groupCalls';
 import { clientIp, devAllowed } from './device';
 import type { Server } from 'bun';
 import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
@@ -405,6 +406,15 @@ export function createServer(opts: { port: number }): Server {
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
+        // запланированный звонок группы: план и «напомнить мне», поставить / снять (админ с правом calls)
+        const callPlan = /^\/groups\/(\d+)\/call-plan(\/remind)?$/.exec(url.pathname);
+        if (callPlan) {
+          const chatId = Number(callPlan[1]);
+          if (callPlan[2] && req.method === 'POST') { const b = (await req.json().catch(() => null)) as { on?: unknown } | null; if (typeof b?.on !== 'boolean') return fail('bad_frame'); return Response.json(await remindGroupCallPlan(userId, chatId, b.on)); }
+          if (!callPlan[2] && req.method === 'GET') return Response.json(await getGroupCallPlan(userId, chatId));
+          if (!callPlan[2] && req.method === 'POST') return Response.json(await planGroupCall(userId, chatId, ((await req.json().catch(() => null)) ?? {}) as { title?: unknown; at?: unknown }));
+          if (!callPlan[2] && req.method === 'DELETE') return Response.json(await cancelGroupCallPlan(userId, chatId));
+        }
         // список «Звонки»: страницами по (время, id), ?missed=1 — только пропущенные; бейдж — /calls/unseen, открыл список — /calls/seen
         if (req.method === 'GET' && url.pathname === '/calls') {
           const m = /^(\d{4}-[0-9T:.\-+Z]+)_(\d+)$/.exec(url.searchParams.get('before') ?? '');

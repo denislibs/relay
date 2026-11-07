@@ -1,4 +1,4 @@
-import { GROUP_CALL_FACES, GROUP_CALL_MEMBERS_MAX, GROUP_CALL_PING_MS, type GroupCallMember, type GroupCallServerFrame, type GroupCallSummary } from '@relay/protocol';
+import { GROUP_CALL_FACES, GROUP_CALL_MEMBERS_MAX, GROUP_CALL_PING_MS, GROUP_CALL_TITLE_MAX, graphemes, type GroupCallMember, type GroupCallPlan, type GroupCallServerFrame, type GroupCallSummary } from '@relay/protocol';
 import { createHmac } from 'node:crypto';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
@@ -71,11 +71,11 @@ async function members(id: string): Promise<Member[]> {
   return vals.map((v) => JSON.parse(v) as Member).sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
-async function meta(id: string): Promise<{ chatId: number; epoch: number; startedBy: number; startedAt: number; joinMuted: boolean } | null> {
+async function meta(id: string): Promise<{ chatId: number; epoch: number; startedBy: number; startedAt: number; joinMuted: boolean; title: string | null } | null> {
   const flat = (await valkey().send('HGETALL', [callKey(id)])) as string[] | Record<string, string> | null;
   const h: Record<string, string> = Array.isArray(flat) ? Object.fromEntries(flat.flatMap((v, i, a) => (i % 2 ? [] : [[v, a[i + 1]]]))) : (flat ?? {});
   if (!h.chatId) return null;
-  return { chatId: Number(h.chatId), epoch: Number(h.epoch ?? 0), startedBy: Number(h.startedBy), startedAt: Number(h.startedAt), joinMuted: h.joinMuted === '1' };
+  return { chatId: Number(h.chatId), epoch: Number(h.epoch ?? 0), startedBy: Number(h.startedBy), startedAt: Number(h.startedAt), joinMuted: h.joinMuted === '1', title: h.title || null };
 }
 
 const pub = (m: Member): GroupCallMember => { const { at: _, ...rest } = m; return rest; };
@@ -83,8 +83,8 @@ const pub = (m: Member): GroupCallMember => { const { at: _, ...rest } = m; retu
 /** Состав и эпоха — всем, кто в звонке (их сессиям). */
 async function broadcast(publish: Publish, id: string, chatId: number, epoch: number, list?: Member[]): Promise<void> {
   const ms = list ?? await members(id);
-  const joinMuted = (await valkey().send('HGET', [callKey(id), 'joinMuted'])) === '1';
-  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub), ...(joinMuted ? { joinMuted } : {}) };
+  const [jm, title] = (await valkey().send('HMGET', [callKey(id), 'joinMuted', 'title'])) as (string | null)[];
+  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub), ...(jm === '1' ? { joinMuted: true } : {}), ...(title ? { title } : {}) };
   for (const m of ms) send(publish, `session:${m.session}`, f);
 }
 
@@ -94,10 +94,14 @@ async function summarize(chatId: number, id: string | null): Promise<void> {
   if (id) {
     const m = await meta(id);
     const ms = await members(id);
-    if (m) call = { callId: id, count: ms.length, startedAt: m.startedAt, faces: [...new Set(ms.map((x) => x.userId))].slice(0, GROUP_CALL_FACES) };
+    if (m) call = summaryOf(id, m, ms);
   }
-  await sql.begin((tx) => chatEvent(tx, chatId, { type: 'groupCall', chatId, call }, 'group'));
+  const plan = await planOf(chatId);
+  await sql.begin((tx) => chatEvent(tx, chatId, { type: 'groupCall', chatId, call, plan }, 'group'));
 }
+
+const summaryOf = (id: string, m: { startedAt: number; title: string | null }, ms: Member[]): GroupCallSummary =>
+  ({ callId: id, count: ms.length, startedAt: m.startedAt, faces: [...new Set(ms.map((x) => x.userId))].slice(0, GROUP_CALL_FACES), ...(m.title ? { title: m.title } : {}) });
 
 /** Кто может начать: участник группы с правом писать; в больших группах — админ с правом «Управление звонками». */
 async function startCtx(userId: number, chatId: number): Promise<GroupCtx> {
@@ -116,8 +120,7 @@ export async function currentGroupCall(userId: number, chatId: number): Promise<
   if (!id) return null;
   const m = await meta(id);
   if (!m) return null;
-  const ms = await members(id);
-  return { callId: id, count: ms.length, startedAt: m.startedAt, faces: [...new Set(ms.map((x) => x.userId))].slice(0, GROUP_CALL_FACES) };
+  return summaryOf(id, m, await members(id));
 }
 
 /** Начать звонок в группе. Уже идёт — вернуть его (две кнопки одновременно не создают два звонка). */
@@ -133,10 +136,13 @@ export async function startGroupCall(userId: number, chatId: number): Promise<{ 
     if (cur && await meta(cur)) return { callId: cur, started: false };
     await valkey().send('SET', [chatKey(chatId), id, 'EX', String(TTL)]);   // ключ пережил звонок — занять
   }
-  await valkey().send('HSET', [callKey(id), 'chatId', String(chatId), 'epoch', '0', 'startedBy', String(userId), 'startedAt', String(now)]);
+  // запланированный звонок группы начался: название — от плана, план (и его напоминания) больше не нужен
+  const [plan] = await sql`delete from group_call_plans where chat_id = ${chatId} returning title`;
+  const title = (plan?.title as string | null) ?? null;
+  await valkey().send('HSET', [callKey(id), 'chatId', String(chatId), 'epoch', '0', 'startedBy', String(userId), 'startedAt', String(now), ...(title ? ['title', title] : [])]);
   await valkey().send('EXPIRE', [callKey(id), String(TTL)]);
   await sql.begin(async (tx) => {
-    await tx`insert into group_calls (id, chat_id, started_by, started_at) values (${id}, ${chatId}, ${userId}, to_timestamp(${now / 1000}))`;
+    await tx`insert into group_calls (id, chat_id, started_by, started_at, title) values (${id}, ${chatId}, ${userId}, to_timestamp(${now / 1000}), ${title})`;
     await serviceMessage(tx, chatId, userId, 'group_call', { groupCall: { callId: id, state: 'started' } }, '', 'group');
   });
   await summarize(chatId, id);
@@ -235,8 +241,15 @@ export async function muteGroupMember(publish: Publish, userId: number, f: { cal
 }
 
 /** Настройки звонка (админ): «новые участники без микрофона». Выключили — заглушённые этим правилом снова могут говорить. */
-export async function setGroupCallSettings(publish: Publish, userId: number, f: { callId: string; joinMuted: boolean }): Promise<{ ok: true }> {
+export async function setGroupCallSettings(publish: Publish, userId: number, f: { callId: string; joinMuted?: boolean; title?: string }): Promise<{ ok: true }> {
   const { m } = await adminCtx(userId, f.callId);
+  if (f.title !== undefined) {
+    const title = validCallTitle(f.title);
+    await valkey().send('HSET', [callKey(f.callId), 'title', title ?? '']);
+    await sql`update group_calls set title = ${title} where id = ${f.callId}`;
+    await summarize(m.chatId, f.callId);
+  }
+  if (f.joinMuted === undefined) { await broadcast(publish, f.callId, m.chatId, m.epoch); return { ok: true }; }
   await valkey().send('HSET', [callKey(f.callId), 'joinMuted', f.joinMuted ? '1' : '0']);
   if (!f.joinMuted) {
     for (const x of await members(f.callId)) {
@@ -328,8 +341,103 @@ export async function activeGroupCalls(chatIds: number[]): Promise<Map<number, G
     if (!id) continue;
     const m = await meta(id);
     if (!m) continue;
-    const ms = await members(id);
-    out.set(chatIds[i], { callId: id, count: ms.length, startedAt: m.startedAt, faces: [...new Set(ms.map((x) => x.userId))].slice(0, GROUP_CALL_FACES) });
+    out.set(chatIds[i], summaryOf(id, m, await members(id)));
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Запланированный звонок (этап 7 docs/plans/2026-11-07-relay-calls-features.md): один план на группу, ставит админ с
+// правом calls; кто нажал «Напомнить» — напоминание в срок; звонок не начинается сам — его начинает админ (или любой,
+// если в группе можно всем), название переходит звонку; не начатый через 2 часа после срока — снимается.
+
+const PLAN_MIN_MS = 60_000;
+const PLAN_MAX_MS = 30 * 24 * 3600_000;
+const PLAN_STALE_MS = 2 * 3600_000;
+
+/** Название звонка: пробелы схлопнуты, пустое — нет названия. */
+export function validCallTitle(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (typeof raw !== 'string') throw new DomainError('bad_frame', 'title');
+  const t = raw.replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  if (graphemes(t) > GROUP_CALL_TITLE_MAX) throw new DomainError('too_long', 'title');
+  return t;
+}
+
+async function planOf(chatId: number): Promise<GroupCallPlan | null> {
+  const [p] = await sql`select id, title, at, created_by from group_call_plans where chat_id = ${chatId}`;
+  return p ? { id: p.id as string, at: new Date(p.at as string).getTime(), title: (p.title as string | null) ?? null, by: Number(p.created_by ?? 0) } : null;
+}
+
+/** Планы групп из списка — для снимка списка чатов. */
+export async function groupCallPlans(chatIds: number[]): Promise<Map<number, GroupCallPlan>> {
+  const out = new Map<number, GroupCallPlan>();
+  if (!chatIds.length) return out;
+  for (const p of await sql`select id, chat_id, title, at, created_by from group_call_plans where chat_id = any(${chatIds}::bigint[])`)
+    out.set(Number(p.chat_id), { id: p.id as string, at: new Date(p.at as string).getTime(), title: (p.title as string | null) ?? null, by: Number(p.created_by ?? 0) });
+  return out;
+}
+
+/** Запланировать (или перенести): админ с «Управлением звонками». Сам админ — в напоминаемых. */
+export async function planGroupCall(userId: number, chatId: number, body: { title?: unknown; at?: unknown }): Promise<GroupCallPlan> {
+  const ctx = await groupCtx(sql, chatId, userId);
+  if (ctx.kind !== 'group') throw new DomainError('bad_frame', 'not a group');
+  if (!hasAdmin(ctx, 'calls')) throw new DomainError('forbidden', 'calls');
+  const at = typeof body.at === 'number' ? body.at : NaN;
+  const now = Date.now();
+  if (!Number.isFinite(at) || at < now + PLAN_MIN_MS || at > now + PLAN_MAX_MS) throw new DomainError('bad_frame', 'at');
+  const title = validCallTitle(body.title);
+  const id = crypto.randomUUID();
+  await sql.begin(async (tx) => {
+    await tx`delete from group_call_plans where chat_id = ${chatId}`;
+    await tx`insert into group_call_plans (id, chat_id, created_by, title, at) values (${id}, ${chatId}, ${userId}, ${title}, to_timestamp(${at / 1000}))`;
+    await tx`insert into group_call_reminders (plan_id, user_id) values (${id}, ${userId})`;
+    await serviceMessage(tx, chatId, userId, 'group_call', { groupCall: { callId: id, state: 'scheduled', at, ...(title ? { title } : {}) } }, '', 'group');
+    await enqueue(tx, 'groupcall.remind', { planId: id }, { runAt: new Date(at), dedupeKey: `gplan:${id}:remind` });
+    await enqueue(tx, 'groupcall.planExpire', { planId: id }, { runAt: new Date(at + PLAN_STALE_MS), dedupeKey: `gplan:${id}:expire` });
+  });
+  await summarize(chatId, (await valkey().send('GET', [chatKey(chatId)])) as string | null);
+  return { id, at, title, by: userId };
+}
+
+export async function cancelGroupCallPlan(userId: number, chatId: number): Promise<{ ok: true }> {
+  const ctx = await groupCtx(sql, chatId, userId);
+  if (!hasAdmin(ctx, 'calls')) throw new DomainError('forbidden', 'calls');
+  await sql`delete from group_call_plans where chat_id = ${chatId}`;
+  await summarize(chatId, (await valkey().send('GET', [chatKey(chatId)])) as string | null);
+  return { ok: true };
+}
+
+/** План группы и «напомнить мне» этого участника. */
+export async function getGroupCallPlan(userId: number, chatId: number): Promise<{ plan: GroupCallPlan | null; remind: boolean }> {
+  await groupCtx(sql, chatId, userId);
+  const plan = await planOf(chatId);
+  if (!plan) return { plan: null, remind: false };
+  const [r] = await sql`select 1 from group_call_reminders where plan_id = ${plan.id} and user_id = ${userId}`;
+  return { plan, remind: !!r };
+}
+
+export async function remindGroupCallPlan(userId: number, chatId: number, on: boolean): Promise<{ remind: boolean }> {
+  await groupCtx(sql, chatId, userId);
+  const plan = await planOf(chatId);
+  if (!plan) throw new DomainError('not_found', 'plan');
+  if (on) await sql`insert into group_call_reminders (plan_id, user_id) values (${plan.id}, ${userId}) on conflict do nothing`;
+  else await sql`delete from group_call_reminders where plan_id = ${plan.id} and user_id = ${userId}`;
+  return { remind: on };
+}
+
+/** Кого напомнить в срок (задача groupcall.remind): план ещё стоит и звонок не начат; только участники группы. */
+export async function planReminders(planId: string): Promise<{ chatId: number; title: string | null; users: number[] } | null> {
+  const [p] = await sql`select p.chat_id, p.title from group_call_plans p where p.id = ${planId}`;
+  if (!p) return null;
+  if (await valkey().send('GET', [chatKey(Number(p.chat_id))])) return null;   // уже идёт
+  const users = (await sql`select r.user_id from group_call_reminders r join chat_members m on m.chat_id = ${p.chat_id} and m.user_id = r.user_id where r.plan_id = ${planId}`).map((r) => Number(r.user_id));
+  return { chatId: Number(p.chat_id), title: (p.title as string | null) ?? null, users };
+}
+
+/** Не начатый через PLAN_STALE_MS после срока — снять (задача groupcall.planExpire). */
+export async function expireGroupCallPlan(planId: string): Promise<void> {
+  const [p] = await sql`delete from group_call_plans where id = ${planId} returning chat_id`;
+  if (p) await summarize(Number(p.chat_id), (await valkey().send('GET', [chatKey(Number(p.chat_id))])) as string | null);
 }

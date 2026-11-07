@@ -34,6 +34,7 @@ export interface GroupCallView {
   reason: 'left' | 'ended' | 'kicked' | 'failed' | 'no_mic' | 'busy' | null;
   rev: number;   // дорожки поменялись — перерисовать видео
   joinMuted: boolean;                 // админ: новые участники — без микрофона
+  title: string | null;               // название звонка (из плана или задал админ)
   reactions: GroupReaction[];         // летящие реакции (живут REACTION_MS)
   chat: GroupChatLine[];              // чат звонка: только пока идёт звонок, не сохраняется
   chatUnread: number;
@@ -140,7 +141,7 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
     videoCaptureDefaults: { resolution: lk.VideoPresets.h720.resolution },
   });
   const a: Active = {
-    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0, joinMuted: false, reactions: [], chat: [], chatUnread: 0 },
+    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0, joinMuted: false, reactions: [], chat: [], chatUnread: 0, title: null },
     mine, session, identity: j.identity, lk, room, keys, myKeys: new Map(), sent: new Set(), pending: new Map(), ping: null, releaseLock: release, ended: false, audios: new Map(),
     raw: new Map(), sentAt: [],
   };
@@ -315,7 +316,7 @@ async function onEvent(f: CallEvent): Promise<void> {
   if (!a && joining && 'callId' in f && f.callId === joining.callId) { if (joining.early.length < 64) joining.early.push(f); return; }
   if (!a || a.ended || !('callId' in f) || f.callId !== a.view.callId) return;
   switch (f.op) {
-    case 'groupCallState': view({ joinMuted: f.joinMuted === true }); return onState(a, f.epoch, f.members);
+    case 'groupCallState': view({ joinMuted: f.joinMuted === true, title: f.title ?? null }); return onState(a, f.epoch, f.members);
     case 'groupCallKeys': return onKeys(a, f);
     case 'groupCallEnded': return finish(a, 'ended');
     case 'groupCallMuted':
@@ -388,6 +389,14 @@ async function onData(a: Active, identity: string, payload: Uint8Array): Promise
   if (!msg || cur !== a) return;
   if (msg.t === 'r' && typeof msg.e === 'string' && CALL_REACTIONS.includes(msg.e)) showReaction(a, identity, msg.e);
   else if (msg.t === 'm' && typeof msg.x === 'string' && msg.x.trim()) addLine(a, { userId: sender.userId, identity, text: msg.x.slice(0, CALL_CHAT_MAX), at: Date.now(), me: false }, true);
+}
+
+/** Админ: название звонка (пустое — без названия). */
+export async function setGroupCallTitle(title: string): Promise<void> {
+  const a = cur;
+  if (!a) return;
+  try { await send({ op: 'groupCallSettings', callId: a.view.callId, title }); }
+  catch { toast('Не удалось переименовать звонок'); }
 }
 
 /** Админ: новые участники входят без микрофона. */
