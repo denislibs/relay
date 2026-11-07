@@ -56,13 +56,6 @@ collectQueueMetrics();
 const metrics = startMetricsServer({ role: 'worker' });
 if (metrics) console.log(`relay worker metrics on :${metrics.port} (build ${BUILD_ID})`);
 console.log('relay worker started');
-// «жив» для healthcheck (deploy/docker-compose.prod.yml): запуск прошёл, цикл событий крутится — файл свежий
-const healthFile = process.env.HEALTH_FILE;
-if (healthFile) {
-  const beat = () => { Bun.write(healthFile, String(Date.now())).catch((e) => console.error('worker: health file:', e)); };
-  beat();
-  setInterval(beat, 15_000).unref();
-}
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, async () => {

@@ -22,12 +22,21 @@
 
 Профиль `observability` — отдельный слой compose поверх стека (`deploy/docker-compose.observability.yml`):
 
+На боевом сервере — `RELAY_OBSERVABILITY=1` в `.env`: `deploy/compose.sh` и `deploy.sh` сами добавляют слой и
+профиль ([deploy.md](deploy.md)):
+
 ```bash
-docker compose -p relay -f docker-compose.yml -f docker-compose.secure.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.observability.yml --profile observability up -d
+sudo -u deploy sed -i 's/^RELAY_OBSERVABILITY=.*/RELAY_OBSERVABILITY=1/' /opt/relay/.env && /opt/relay/deploy/compose.sh up -d
 ```
 
-В `.env` нужны `TELEGRAM_BOT_TOKEN` и `TELEGRAM_OWNER_CHAT_ID` (уже есть для кодов входа) и `GRAFANA_ADMIN_PASSWORD`.
-Локально — то же поверх `docker-compose.yml` (тогда тревоги уйдут в настоящий Telegram, если токен настоящий).
+Секреты — файлами, как у всего боевого стека: токен бота — `secrets/run/telegram_bot_token` (тот же, что для кодов
+входа), пароль Grafana — `secrets/run/grafana_admin_password` (создаёт `deploy/make-secrets.sh`); в `.env` —
+только `TELEGRAM_OWNER_CHAT_ID`. Локально поверх `docker-compose.yml` — те же два файла в `./secrets/run/` (тогда
+тревоги уйдут в настоящий Telegram, если токен настоящий):
+
+```bash
+docker compose -f docker-compose.yml -f deploy/docker-compose.observability.yml --profile observability up -d
+```
 
 Что поднимается (пределы памяти; в работе вместе ≈ 200 МБ, пределы — 600 МБ):
 
@@ -54,7 +63,7 @@ Grafana слушает только `127.0.0.1:3001` сервера. С ноут
 ssh -N -L 3001:127.0.0.1:3001 root@denigram.site
 ```
 
-Затем <http://localhost:3001>, вход `admin` / `GRAFANA_ADMIN_PASSWORD`. Панель «Relay» — домашняя. Переменная
+Затем <http://localhost:3001>, вход `admin` / пароль из `secrets/run/grafana_admin_password`. Панель «Relay» — домашняя. Переменная
 «Сборка» оставляет на всех графиках только выбранные сборки; фиолетовые отметки «Выкаты» — когда у server
 появилась новая сборка.
 

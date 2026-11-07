@@ -9,13 +9,16 @@ export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-relay}"   # проверк�
 log() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" >&2; }
 die() { log "ERROR: $*"; exit 1; }
 
-# docker compose со всеми тремя слоями. RELAY_TAG — из окружения или текущего развёрнутого (state/current).
-# RELAY_COMPOSE_EXTRA — ещё один слой поверх (проверка на другой машине: свои порты; на сервере не нужен)
+# docker compose со всеми слоями. RELAY_TAG — из окружения или текущего развёрнутого (state/current).
+# RELAY_OBSERVABILITY=1 в .env — ещё и deploy/docker-compose.observability.yml с профилем observability (метрики,
+# тревоги, панель — docs/observability.md). RELAY_COMPOSE_EXTRA — ещё один слой (проверка на другой машине: свои порты)
 compose() {
   if [ -z "${RELAY_TAG:-}" ] && [ -f "$STATE_DIR/current" ]; then RELAY_TAG=$(cat "$STATE_DIR/current"); fi
-  RELAY_TAG="${RELAY_TAG:-none}" docker compose --project-directory "$RELAY_DIR" --env-file "$ENV_FILE" \
+  obs=""
+  if [ "$(env_get RELAY_OBSERVABILITY)" = 1 ]; then obs="$RELAY_DIR/deploy/docker-compose.observability.yml"; fi
+  RELAY_TAG="${RELAY_TAG:-none}" COMPOSE_PROFILES="${obs:+observability}" docker compose --project-directory "$RELAY_DIR" --env-file "$ENV_FILE" \
     -f "$RELAY_DIR/docker-compose.yml" -f "$RELAY_DIR/docker-compose.secure.yml" -f "$RELAY_DIR/deploy/docker-compose.prod.yml" \
-    ${RELAY_COMPOSE_EXTRA:+-f "$RELAY_COMPOSE_EXTRA"} "$@"
+    ${obs:+-f "$obs"} ${RELAY_COMPOSE_EXTRA:+-f "$RELAY_COMPOSE_EXTRA"} "$@"
 }
 
 # значение из .env без загрузки всего файла в окружение (секреты не расползаются по дочерним процессам)

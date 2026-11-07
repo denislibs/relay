@@ -8,7 +8,9 @@
 #     сеть bao — только он и сервис ключей (VAULT_ADDR=https://openbao:8200), выхода наружу нет;
 #   - данные SeaweedFS — на отдельном разделе хоста (/srv/relay-s3), а не в томе;
 #   - TURN: шире диапазон портов релея и полоса на сессию (видео); внешние адреса TURN и LiveKit — из .env;
-#   - healthcheck у server, worker, keys и proxy — по ним deploy.sh ждёт готовности; restart у всех долгоживущих.
+#   - healthcheck у server, worker, keys (их /ready) и proxy — по ним deploy.sh ждёт готовности; restart у всех
+#     долгоживущих;
+#   - наблюдаемость (deploy/docker-compose.observability.yml) — по желанию: RELAY_OBSERVABILITY=1 в .env (lib.sh).
 
 x-relay-server: &relay-server
   image: ${RELAY_REGISTRY:-ghcr.io/denislibs}/relay-server:${RELAY_TAG:?set RELAY_TAG (deploy/deploy.sh sets it)}
@@ -57,10 +59,9 @@ services:
     <<: *relay-server
     environment:
       VAULT_ADDR: https://openbao:8200
-    # жив = принимает TLS с верным сертификатом. Без HTTP-запроса: запрос без токена лёг бы в журнал аудита
-    # отказом — каждые 10 с
+    # готов = OpenBao распечатан и отвечает (/ready без токена и мимо журнала аудита — keyService.ts)
     healthcheck:
-      test: ["CMD", "bun", "-e", "const s = require('node:tls').connect({ host: 'keys', port: 7800, servername: 'keys' }, () => { s.end(); process.exit(0); }); s.on('error', () => process.exit(1))"]
+      test: ["CMD", "bun", "-e", "fetch('https://keys:7800/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -78,8 +79,9 @@ services:
       VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${RELAY_DOMAIN}}
     volumes:
       - *assets
+    # готов = Postgres, Valkey и KMS отвечают (obs/ready.ts)
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -87,12 +89,11 @@ services:
 
   worker:
     <<: *relay-server
-    environment:
-      HEALTH_FILE: /tmp/relay-worker.alive   # worker.ts обновляет раз в 15 с, когда запуск прошёл
     volumes:
       - *assets
+    # готов — по внутреннему порту воркера (METRICS_PORT 9091: /metrics, /ready — obs/server.ts)
     healthcheck:
-      test: ["CMD-SHELL", "test -n \"$$(find /tmp/relay-worker.alive -mmin -1 2>/dev/null)\""]
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:9091/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 15s
       timeout: 5s
       retries: 3

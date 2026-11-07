@@ -71,6 +71,8 @@ secret livekit_keys livekit_keys
 # Telegram: токен бота вписывает владелец (sudo -u deploy sh -c 'cat > /opt/relay/secrets/run/telegram_bot_token')
 secret telegram_bot_token empty
 secret telegram_webhook_secret hex 32
+# наблюдаемость (deploy/docker-compose.observability.yml, если RELAY_OBSERVABILITY=1): вход в Grafana
+secret grafana_admin_password alnum 32
 
 log "secrets in $run:${made:- nothing generated (all present)}"
 
@@ -94,6 +96,7 @@ put TELEGRAM_OWNER_CHAT_ID ""
 put TELEGRAM_BOT_USERNAME ""
 put TELEGRAM_LOGIN "0"
 put TELEGRAM_WEBHOOK_URL "${domain:+https://$domain/auth/telegram/webhook}"
+put RELAY_OBSERVABILITY "0"
 put AGE_DATA ""
 put AGE_KEYS ""
 put BACKUP_RCLONE_DATA ""

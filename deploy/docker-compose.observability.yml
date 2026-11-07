@@ -7,10 +7,14 @@
 #                     server и worker (:9091, внутренний порт, мимо nginx), coturn (:9641), LiveKit (:6789),
 #                     node-exporter (диски, память хоста), cadvisor (память и CPU контейнеров);
 #   vmalert         — правила тревог (deploy/observability/vmalert/alerts.yml) → alertmanager → бот Telegram
-#                     (TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID — те же, что у доставки кодов);
+#                     (тот же бот и чат, что у доставки кодов: секрет telegram_bot_token, TELEGRAM_OWNER_CHAT_ID);
 #   grafana         — панель «Relay» по сборкам; только 127.0.0.1:3001 — открывать через ssh -L, наружу не публикуется.
 #
 # Наружу не опубликовано ничего; все сервисы — с пределом памяти, вместе ≈ 600 МБ.
+# Секреты — файлами, как у остального боевого стека (docker-compose.secure.yml): secrets/run/telegram_bot_token и
+# secrets/run/grafana_admin_password (deploy/make-secrets.sh), в окружении и аргументах их нет. Процессы здесь не
+# root — им добавлена группа 1000, которой открыты файлы секретов (640).
+# На боевом сервере слой подключает deploy/lib.sh, если в .env RELAY_OBSERVABILITY=1.
 x-obs: &obs
   profiles: ["observability"]
   restart: unless-stopped
@@ -57,8 +61,8 @@ services:
     mem_limit: 40m
     depends_on: [victoriametrics, alertmanager]
 
-  # токен бота и id чата — из окружения: alertmanager не подставляет переменные в конфиг сам, поэтому конфиг
-  # собирается при старте в tmpfs (токен — отдельным файлом, в конфиг и в логи не попадает)
+  # токен бота — файлом (bot_token_file → docker secret); id чата alertmanager в конфиг сам не подставляет, поэтому
+  # конфиг собирается при старте в tmpfs
   alertmanager:
     <<: *obs
     image: prom/alertmanager:v0.28.1
@@ -68,12 +72,12 @@ services:
         set -eu
         case "$$TELEGRAM_OWNER_CHAT_ID" in ''|*[!0-9-]*) echo "TELEGRAM_OWNER_CHAT_ID must be a number" >&2; exit 1;; esac
         umask 077
-        printf %s "$$TELEGRAM_BOT_TOKEN" > /run/am/bot_token
         sed "s/__TELEGRAM_OWNER_CHAT_ID__/$$TELEGRAM_OWNER_CHAT_ID/" /etc/alertmanager/alertmanager.yml > /run/am/alertmanager.yml
         exec /bin/alertmanager --config.file=/run/am/alertmanager.yml --storage.path=/alertmanager --web.listen-address=:9093 --cluster.listen-address=
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN (alerts go through the same bot)}
       TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:?set TELEGRAM_OWNER_CHAT_ID}
+    secrets: [telegram_bot_token]
+    group_add: ["1000"]
     volumes:
       - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - amdata:/alertmanager
@@ -130,7 +134,7 @@ services:
     ports: ["127.0.0.1:${GRAFANA_PORT:-3001}:3000"]
     environment:
       GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
@@ -144,9 +148,15 @@ services:
       - grafanadata:/var/lib/grafana
       - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    secrets: [grafana_admin_password]
+    group_add: ["1000"]
     tmpfs: ["/tmp:size=16m"]
     mem_limit: 160m
     depends_on: [victoriametrics]
+
+secrets:
+  telegram_bot_token: { file: ./secrets/run/telegram_bot_token }
+  grafana_admin_password: { file: ./secrets/run/grafana_admin_password }
 
 volumes:
   vmdata: {}

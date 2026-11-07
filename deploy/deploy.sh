@@ -2,7 +2,7 @@
 # Выкатить версию <sha> на этот сервер (запускает .github/workflows/deploy.yml по SSH, можно и руками):
 #   /opt/relay/deploy/deploy.sh <git sha>
 # Шаги: checkout того же коммита (конфиги compose/nginx) → pull образов → migrate → up -d → ждать healthy
-# server/worker/keys/proxy → проверка https://<домен>/ (/version.json = sha) и API (/health) → записать тег.
+# server/worker/keys/proxy → проверка https://<домен>/ (/version.json = sha) и API (/health, /ready) → записать тег.
 # Ошибка на любом шаге после checkout — откат на прежний тег тем же путём и выход с ненулевым кодом.
 # Миграции не откатываются: CI пропускает только совместимые с прежним кодом (tools/ci/migration-lint.ts).
 #
@@ -181,13 +181,15 @@ smoke() {
     # shellcheck disable=SC2086
     health=$(curl -fsS --max-time 10 $resolve "https://$domain/health" 2>/dev/null || true)
     # shellcheck disable=SC2086
+    ready=$(curl -fsS --max-time 10 $resolve "https://$domain/ready" 2>/dev/null || true)
+    # shellcheck disable=SC2086
     page=$(curl -fsS --max-time 10 $resolve -o /dev/null -w '%{http_code}' "https://$domain/" 2>/dev/null || true)
-    case "$build|$health|$page" in
-      *"\"build\":\"$tag\""*'|'*'"ok":true'*'|200') log "smoke ok: https://$domain/ serves $tag, API healthy"; return 0 ;;
+    case "$build|$health|$ready|$page" in
+      *"\"build\":\"$tag\""*'|'*'"ok":true'*'|'*'"ok":true'*'|200') log "smoke ok: https://$domain/ serves $tag, API healthy and ready"; return 0 ;;
     esac
     i=$((i + 1))
     if [ "$i" -ge 10 ]; then
-      log "smoke failed: version.json=[$build] /health=[$health] / → [$page]"
+      log "smoke failed: version.json=[$build] /health=[$health] /ready=[$ready] / → [$page]"
       return 1
     fi
     sleep 3

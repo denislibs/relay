@@ -56,8 +56,12 @@ read-only, не root, сервис ключей, секреты файлами) 
 - данные SeaweedFS — `/srv/relay-s3`, а не том;
 - TURN: релей `49152–49952/udp`, полоса `max-bps=2500000` байт/с на сессию; LiveKit — `50000–50060/udp`, `7881/tcp`;
   внешний адрес у обоих — из `.env`;
-- healthcheck: server — `GET /health`, worker — файл-пульс (worker.ts, раз в 15 с), keys — ответ по TLS,
-  proxy — `/version.json`, OpenBao — «распечатан»; `restart: unless-stopped` у всех долгоживущих.
+- healthcheck: server — `GET /ready` (Postgres, Valkey, KMS), worker — `/ready` на внутреннем порту 9091, keys —
+  `/ready` (OpenBao распечатан; без токена и мимо журнала аудита), proxy — `/version.json`, OpenBao — «распечатан»;
+  `restart: unless-stopped` у всех долгоживущих;
+- наблюдаемость ([observability.md](observability.md): VictoriaMetrics, тревоги в Telegram, Grafana) — по желанию:
+  `RELAY_OBSERVABILITY=1` в `.env`, и `deploy/compose.sh` / `deploy.sh` подключают `deploy/docker-compose.observability.yml`
+  с профилем `observability`.
 
 Порты наружу (ufw + DOCKER-USER уже пускают ровно их): `80`, `443`, `8333` (S3 по подписанным ссылкам) — proxy;
 `3478 tcp/udp`, `49152–49952/udp` — TURN; `7881/tcp`, `50000–50060/udp` — LiveKit. Postgres, Valkey, S3, поиск,
@@ -92,6 +96,10 @@ gitleaks (`.gitleaks.toml`: исключены только dev-значения
 | `livekit_api_key`, `livekit_api_secret`, `livekit_keys` | make-secrets | server; «ключ: секрет» — livekit (`--key-file`) |
 | `telegram_bot_token` | **владелец** (BotFather) | server, worker |
 | `telegram_webhook_secret` | make-secrets | server, worker |
+| `grafana_admin_password` | make-secrets | grafana (`GF_SECURITY_ADMIN_PASSWORD__FILE`; только с наблюдаемостью) |
+
+Токен бота монтируется и alertmanager (`bot_token_file`), если включена наблюдаемость. Процессы alertmanager и
+Grafana не root — им добавлена группа 1000.
 
 Вне `secrets/run`:
 
@@ -287,6 +295,10 @@ Settings → Branches (или Rules) → правило для `master`: Require
 - `server tests`, `engine tests`
 - `build images`
 
+Один известный нестабильный тест сервера — `bus.test.ts` «a socket opened after Valkey lost the process key still
+counts» (гонка вокруг перезапуска Valkey) — задание `server tests` повторяет один раз, если упал только он;
+предупреждение видно в логе. Любой другой провал или повторный — красный CI.
+
 Плюс Require branches to be up to date. Тогда в master попадает только то, что прошло всё, — а deploy.yml на коммите
 master прогоняет ci.yml ещё раз перед выкатом.
 
@@ -326,8 +338,8 @@ sha (и `latest`), заходит на сервер (`deploy <sha>` → `deploy.
 4. ждать healthy у keys, server, worker, proxy (до 240 с);
 5. ни одного значения из `secrets/run` в `docker inspect` контейнеров (иначе — провал: секрет утёк в окружение);
 6. ключ Meilisearch «только поиск» — создать/сверить; продлить токен OpenBao;
-7. `https://denigram.site/version.json` отдаёт `<sha>` (сборка клиента в образе proxy — та самая), `/health` — ok,
-   `/` — 200. Запрос идёт на `127.0.0.1:443`, но сертификат проверяется по имени домена;
+7. `https://denigram.site/version.json` отдаёт `<sha>` (сборка клиента в образе proxy — та самая), `/health` и
+   `/ready` — ok, `/` — 200. Запрос идёт на `127.0.0.1:443`, но сертификат проверяется по имени домена;
 8. записать `deploy/state/current` (прежний — в `previous`) и строку в `history`.
 
 Ошибка на шагах 2–7 — те же шаги для прежнего тега и выход с кодом 1.
