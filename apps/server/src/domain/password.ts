@@ -44,11 +44,19 @@ export async function afterFirstFactor(f: FirstFactor): Promise<LoginStep> {
   return { passwordNeeded: true, pendingId: id, hint: pw.hint as string };
 }
 
-export async function startSignup(phone: string): Promise<LoginStep> {
+/** prefill — подсказка формы (имя, фамилия, file_id фото из Telegram): хранится в заявке, отдаётся только по ней. */
+export async function startSignup(phone: string, prefill: { first: string | null; last: string | null; photo: string | null } | null = null): Promise<LoginStep> {
   const id = crypto.randomUUID();
-  await sql`insert into login_pending (id, kind, phone, confirmed, expires_at)
-            values (${id}, 'signup', ${phone}, true, now() + ${PENDING_MIN + ' minutes'}::interval)`;
+  await sql`insert into login_pending (id, kind, phone, confirmed, expires_at, prefill)
+            values (${id}, 'signup', ${phone}, true, now() + ${PENDING_MIN + ' minutes'}::interval, ${prefill ? sql.json(prefill as never) : null})`;
   return { signupRequired: true, pendingId: id };
+}
+
+/** file_id фото из Telegram у живой заявки регистрации (иначе null — фото нет или заявка устарела). */
+export async function signupPhoto(pendingId: unknown): Promise<string | null> {
+  if (typeof pendingId !== 'string' || !/^[0-9a-f-]{36}$/.test(pendingId)) return null;
+  const [p] = await sql`select prefill->>'photo' as photo from login_pending where id = ${pendingId} and kind = 'signup' and dead_at is null and expires_at > now()`;
+  return (p?.photo as string | null) ?? null;
 }
 
 async function livePending(id: unknown, kind: 'password' | 'signup') {
@@ -69,7 +77,7 @@ export async function finishSignup(pendingId: unknown, first: unknown, last: unk
     if (taken) throw new DomainError('code_expired');
     const name = lastName ? `${firstName} ${lastName}` : firstName;
     const [u] = await tx`insert into users (name, first_name, last_name, phone) values (${name}, ${firstName}, ${lastName || null}, ${p.phone}) returning id`;
-    await tx`update login_pending set dead_at = now() where id = ${p.id}`;
+    await tx`update login_pending set dead_at = now(), prefill = null where id = ${p.id}`;
     return { userId: Number(u.id), confirmed: true };
   });
 }

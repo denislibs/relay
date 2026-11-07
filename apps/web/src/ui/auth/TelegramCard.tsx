@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, errorText, type Step } from './api';
-import { CardHead, ErrorLine, Logo, useFlow } from './AuthFlow';
+import { CardHead, ErrorLine, Logo, useFlow, type SignupPrefill } from './AuthFlow';
 
 const POLL_MS = 2000;
 
@@ -31,7 +31,7 @@ export function TelegramCard() {
       timer = setTimeout(poll, POLL_MS);
     }
     async function poll() {
-      const r = await call<(Step & { phone?: string }) | { status: 'wait' | 'denied' | 'expired' }>('/auth/telegram/poll', { token: current.current });
+      const r = await call<(Step & { phone?: string; prefill?: SignupPrefill }) | { status: 'wait' | 'denied' | 'expired' }>('/auth/telegram/poll', { token: current.current });
       if (!alive.current) return;
       if (!r.ok) { timer = setTimeout(poll, POLL_MS * 2); return; }
       if ('status' in r.data) {
@@ -41,7 +41,7 @@ export function TelegramCard() {
         void fresh();
         return;
       }
-      flow.finish(r.data, { phone: r.data.phone });
+      flow.finish(r.data, { phone: r.data.phone, prefill: r.data.prefill });
     }
     void fresh();
     return () => { alive.current = false; clearTimeout(timer); };

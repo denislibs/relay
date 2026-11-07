@@ -9,8 +9,9 @@ import { requestCode, signIn } from './domain/login';
 import { deletePasskey, finishLogin, listPasskeys, loginOptions, registerPasskey, registrationOptions } from './domain/passkeys';
 import {
   afterFirstFactor, checkPending, finishRecovery, finishSignup, passwordState, pendingChallenge, removePassword, setPassword, startRecovery, startSignup,
-  challengeFor, type LoginStep,
+  challengeFor, signupPhoto, type LoginStep,
 } from './domain/password';
+import { botFile } from './domain/telegramBot';
 import { acceptQr, createQr, pollQr, qrInfo } from './domain/qrLogin';
 import { createTelegramLogin, handleBotUpdate, pollTelegramLogin, telegramLoginEnabled, webhookAllowed, type BotUpdate } from './domain/telegramLogin';
 import { announceLogin, assertConfirmed } from './domain/sessions';
@@ -124,8 +125,27 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
     const r = await pollTelegramLogin(b.token, key);
     if (typeof r === 'string') return Response.json({ status: r });
     const [u] = await sql`select id from users where phone = ${r.phone} and not system`;
-    if (!u) return Response.json({ ...(await startSignup(r.phone)), phone: r.phone });
+    if (!u) {
+      // новый номер: имя и фамилия из Telegram — сразу в ответ, фото — отдельным запросом (/auth/signup/photo)
+      const pre = r.prefill;
+      return Response.json({
+        ...(await startSignup(r.phone, pre)), phone: r.phone,
+        ...(pre ? { prefill: { firstName: pre.first ?? '', lastName: pre.last ?? '', photo: !!pre.photo } } : {}),
+      });
+    }
     return reply(await afterFirstFactor({ userId: Number(u.id), confirmed: false }), req, server, key, 'telegram');
+  }
+  // фото из Telegram для формы регистрации: по заявке (её id знает только устройство, начавшее вход), байты — через нас
+  if (post && p === '/auth/signup/photo') {
+    const fileId = await signupPhoto((await body(req)).pendingId);
+    if (!fileId) return Response.json({ code: 'not_found' }, { status: 404 });
+    try {
+      const f = await botFile(fileId);
+      return new Response(f.bytes, { headers: { 'content-type': f.mime, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' } });
+    } catch (e) {
+      console.warn(`telegram login: signup photo — ${(e as Error).message}`);
+      return Response.json({ code: 'not_found' }, { status: 404 });
+    }
   }
   // обновления бота (webhook): только с секретом заголовка; ответ всегда 200 — повтор Telegram ничего бы не исправил
   if (post && p === '/auth/telegram/webhook') {
