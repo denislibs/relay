@@ -11,10 +11,10 @@ cd "$dir"
 if [ ! -f ca.pem ]; then
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 -subj "/CN=relay-internal-ca" -keyout ca-key.pem -out ca.pem 2>/dev/null
 fi
-# имя файла | CN | DNS-имена (через запятую) | назначение: server | client
+# имя файла | CN | имена (через запятую; IP:адрес — адрес, иначе DNS) | назначение: server | client
 issue() {
   name="$1"; cn="$2"; dns="$3"; use="$4"
-  san=""; for d in $(echo "$dns" | tr ',' ' '); do san="${san:+$san,}DNS:$d"; done
+  san=""; for d in $(echo "$dns" | tr ',' ' '); do case "$d" in IP:*) san="${san:+$san,}$d" ;; *) san="${san:+$san,}DNS:$d" ;; esac; done
   eku=$([ "$use" = client ] && echo clientAuth || echo serverAuth)
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=$cn" -keyout "$name-key.pem" -out "$name.csr" 2>/dev/null
   printf "subjectAltName=%s\nextendedKeyUsage=%s\nbasicConstraints=CA:FALSE\n" "$san" "$eku" > "$name.ext"
@@ -26,9 +26,11 @@ issue valkey   valkey   valkey,vk     server
 issue s3       s3       s3            server
 issue search   search   search        server
 issue keys     keys     keys          server
+# OpenBao (deploy/docker-compose.prod.yml): keys ходит на openbao, скрипты deploy/bao-*.sh — изнутри контейнера на 127.0.0.1
+issue bao      openbao  openbao,localhost,IP:127.0.0.1 server
 issue client   relay    relay         client     # server, worker, migrate — клиентский сертификат к Postgres (mTLS)
 # Postgres читает ключ, только если он принадлежит его пользователю (uid 70 в alpine-образе) и закрыт для остальных
 chmod 600 ./*-key.pem
 chmod 644 ./*.pem 2>/dev/null || true
 chmod 600 ./*-key.pem
-echo "internal certs in $dir: ca.pem + postgres, valkey, s3, search, keys (server) and client (mTLS)"
+echo "internal certs in $dir: ca.pem + postgres, valkey, s3, search, keys, bao (server) and client (mTLS)"

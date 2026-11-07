@@ -1,24 +1,31 @@
-# Продакшен поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md, аудит 2026-10-25):
+# Продакшен поверх docker-compose.yml (план docs/plans/2026-10-21-relay-at-rest-encryption.md, аудит 2026-10-25).
+# Боевой сервер — ещё и deploy/docker-compose.prod.yml поверх этого (docs/deploy.md):
 #   sh tools/tls/make-internal-certs.sh            # внутренний CA и сертификаты сервисов → secrets/tls/
+#   deploy/make-secrets.sh                         # секреты → secrets/run/<имя>, остальные настройки → .env
 #   cp <сертификат домена> secrets/public/server.pem; cp <ключ> secrets/public/server-key.pem
 #   docker compose -f docker-compose.yml -f docker-compose.secure.yml up -d
-# Секреты — только из окружения (без значений по умолчанию): compose не запустится, если их нет.
+#
+# Секреты — только файлами (docker secrets: ./secrets/run/<имя> → /run/secrets/<имя>, один файл — одно значение,
+# каждому сервису — только его): ни в environment, ни в аргументах команд (их видно в `docker inspect` и `ps`), ни в
+# образе. Наши процессы читают X_FILE (apps/server/src/secretFiles.ts); Postgres — POSTGRES_PASSWORD_FILE; Valkey,
+# Meilisearch и coturn — обёртка при старте пишет конфиг или окружение процесса из файла; SeaweedFS — s3-secure.sh;
+# LiveKit — --key-file. Нет файла — compose не запустится. В .env — только несекретное (домен, адреса, флаги).
 #
 # Что здесь иначе, чем в dev:
 #   - наружу опубликован только proxy (443/80/8333); Postgres, Valkey, S3, поиск и KMS — без портов (INFRA-1);
 #   - Postgres и Valkey — во внутренней сети `data`, только TLS: Postgres hostssl + клиентский сертификат (mTLS)
 #     и пароль, Valkey — tls-port и пароль; S3, поиск и сервис ключей — https; общий CA — NODE_EXTRA_CA_CERTS.
 #     Без этого server/worker/keys в production не стартуют (tls.ts, обхода нет);
-#   - S3: учётка из окружения (не из репозитория), без прав администратора бакета; :8333 пропускает только
+#   - S3: учётка из секретов (не из репозитория), без прав администратора бакета; :8333 пропускает только
 #     подписанные запросы к объектам (docker/nginx/production.conf, INFRA-2);
 #   - образы без исходников на томах, без --watch, файловая система только для чтения, временные файлы — tmpfs
 #     (расшифрованные медиа воркера не ложатся на диск, CRYPTO-14), процесс не от root (INFRA-5);
 #   - HSTS (INFRA-3), dev-входы выключены и запрещены (INFRA-6); коды входа — ботом Telegram владельцу
-#     (TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID в .env — docs/code-delivery.md).
+#     (секрет telegram_bot_token, TELEGRAM_OWNER_CHAT_ID в .env — docs/code-delivery.md).
 #
 # Индекс поиска хранит только HMAC-токены слов (search/tokens.ts), но всё равно изолирован:
 #   - Meilisearch в своей внутренней сети `search` — его видят только server и worker;
-#   - server ходит с ключом «только поиск» (MEILI_API_KEY, выпуск: bun apps/server/src/dev/meiliKeys.ts),
+#   - server ходит с ключом «только поиск» (meili_search_key; выводится из мастер-ключа, deploy/make-secrets.sh),
 #     мастер-ключ — только у worker (он пишет в индекс); том meili не бэкапится.
 #
 # Главный ключ (KMS): учётные данные Vault — только у сервиса ключей (apps/server/src/keyService.ts) в своей
@@ -33,32 +40,58 @@ networks:
   # выход к Vault (может быть на другом хосте) — только у сервиса ключей
   kms-egress: {}
 
-x-tls-client: &tls-client
+# файлы создаёт deploy/make-secrets.sh (vault_token и bao_* — deploy/bao-init.sh); права 640, группа 1000 — bun
+secrets:
+  pg_password: { file: ./secrets/run/pg_password }
+  valkey_password: { file: ./secrets/run/valkey_password }
+  s3_access_key_id: { file: ./secrets/run/s3_access_key_id }
+  s3_secret_access_key: { file: ./secrets/run/s3_secret_access_key }
+  meili_master_key: { file: ./secrets/run/meili_master_key }
+  meili_search_key: { file: ./secrets/run/meili_search_key }
+  key_service_tokens: { file: ./secrets/run/key_service_tokens }   # «server:<токен>,worker:<токен>» — для keys
+  key_token_server: { file: ./secrets/run/key_token_server }
+  key_token_worker: { file: ./secrets/run/key_token_worker }
+  key_service_audit_key: { file: ./secrets/run/key_service_audit_key }
+  vault_token: { file: ./secrets/run/vault_token }
+  turn_secret: { file: ./secrets/run/turn_secret }
+  livekit_api_key: { file: ./secrets/run/livekit_api_key }
+  livekit_api_secret: { file: ./secrets/run/livekit_api_secret }
+  livekit_keys: { file: ./secrets/run/livekit_keys }               # «<ключ>: <секрет>» — для livekit --key-file
+  telegram_bot_token: { file: ./secrets/run/telegram_bot_token }
+  telegram_webhook_secret: { file: ./secrets/run/telegram_webhook_secret }
+
+# база: адрес без пароля, пароль — файлом (secretFiles.ts вписывает его в адрес)
+x-db: &db
   NODE_EXTRA_CA_CERTS: /certs/ca.pem
-  DATABASE_URL: postgres://relay:${PG_PASSWORD:?set PG_PASSWORD}@postgres:5432/relay
+  DATABASE_URL: postgres://relay@postgres:5432/relay
+  DATABASE_PASSWORD_FILE: /run/secrets/pg_password
   DB_SSL: verify-full
   DB_CA: /certs/ca.pem
   DB_CERT: /certs/client.pem
   DB_KEY: /certs/client-key.pem
-  VALKEY_URL: rediss://:${VALKEY_PASSWORD:?set VALKEY_PASSWORD}@valkey:6379
-  VALKEY_CA: /certs/ca.pem
-  S3_ENDPOINT: https://s3:8333
-  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
-  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
-  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT (https://example.com:8333)}
-  MEILI_URL: https://search:7700
-  KMS_PROVIDER: service
-  KEY_SERVICE_URL: https://keys:7800
   DEV_LOGIN: "0"
   LOG_LOGIN_CODES: "0"   # в базовом файле по умолчанию 1 — production с ним не стартует (tls.ts)
   DEV_MIGRATE: "0"
   NODE_ENV: production
 
+x-tls-client: &tls-client
+  <<: *db
+  VALKEY_URL: rediss://valkey:6379
+  VALKEY_PASSWORD_FILE: /run/secrets/valkey_password
+  VALKEY_CA: /certs/ca.pem
+  S3_ENDPOINT: https://s3:8333
+  S3_ACCESS_KEY_ID_FILE: /run/secrets/s3_access_key_id
+  S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
+  S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:?set S3_PUBLIC_ENDPOINT (https://example.com:8333)}
+  MEILI_URL: https://search:7700
+  KMS_PROVIDER: service
+  KEY_SERVICE_URL: https://keys:7800
+
 # коды входа и регистрации (domain/codeDelivery.ts, docs/code-delivery.md): бот Telegram шлёт их в чат владельца.
 # Нужны и server (проверка старта), и worker (отправка); без токена или id чата production не стартует (tls.ts).
 x-code-delivery: &code-delivery
   CODE_DELIVERY: ${CODE_DELIVERY:-telegram}
-  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN (docs/code-delivery.md)}
+  TELEGRAM_BOT_TOKEN_FILE: /run/secrets/telegram_bot_token
   TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:?set TELEGRAM_OWNER_CHAT_ID (docs/code-delivery.md)}
   TELEGRAM_DAILY_CAP: ${TELEGRAM_DAILY_CAP:-300}
   CODE_TIME_ZONE: ${CODE_TIME_ZONE:-UTC}
@@ -67,7 +100,7 @@ x-code-delivery: &code-delivery
   TELEGRAM_LOGIN: ${TELEGRAM_LOGIN:-0}
   TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
   TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
-  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+  TELEGRAM_WEBHOOK_SECRET_FILE: /run/secrets/telegram_webhook_secret
 
 x-hardened: &hardened
   read_only: true
@@ -80,7 +113,9 @@ services:
   postgres:
     ports: !reset []
     environment:
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD}
+      POSTGRES_PASSWORD: !reset null
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets: [pg_password]
     # ключ сервера Postgres читает, только если он принадлежит его пользователю: копия с правами — при старте
     entrypoint: ["sh", "-c", "install -d -o postgres -m 700 /run/pgtls && install -o postgres -m 600 /certs/postgres.pem /certs/postgres-key.pem /certs/ca.pem /run/pgtls/ && exec docker-entrypoint.sh \"$$@\"", "--"]
     command: ["postgres", "-c", "wal_compression=on", "-c", "shared_buffers=512MB", "-c", "effective_cache_size=1536MB",
@@ -91,27 +126,29 @@ services:
       - ./docker/postgres/pg_hba.secure.conf:/etc/postgresql/pg_hba.conf:ro
     networks: [data]
 
+  # пароль — в конфиг-файл при старте (от root, файл 600 у valkey), не аргументом valkey-server
   valkey:
     ports: !reset []
-    command: ["valkey-server", "--save", "", "--appendonly", "no", "--port", "0", "--tls-port", "6379",
+    secrets: [valkey_password]
+    entrypoint: ["sh", "-c", "umask 077 && printf 'requirepass %s\\n' \"$$(cat /run/secrets/valkey_password)\" > /tmp/valkey.conf && chown valkey /tmp/valkey.conf && exec docker-entrypoint.sh valkey-server /tmp/valkey.conf \"$$@\"", "--"]
+    command: ["--save", "", "--appendonly", "no", "--port", "0", "--tls-port", "6379",
               "--tls-cert-file", "/certs/valkey.pem", "--tls-key-file", "/certs/valkey-key.pem", "--tls-ca-cert-file", "/certs/ca.pem",
-              "--tls-auth-clients", "no", "--requirepass", "${VALKEY_PASSWORD:?set VALKEY_PASSWORD}"]
-    environment:
-      VALKEY_PASSWORD: ${VALKEY_PASSWORD:?set VALKEY_PASSWORD}
+              "--tls-auth-clients", "no"]
     volumes:
       - ./secrets/tls:/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli --tls --cacert /certs/ca.pem -h valkey -a \"$$VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$(cat /run/secrets/valkey_password)\" valkey-cli --tls --cacert /certs/ca.pem -h valkey --no-auth-warning ping | grep -q PONG"]
     networks: [data]
 
-  # учётка S3 — из окружения, без Admin (бакет создаёт s3-init через мастер); S3 — только https
+  # учётка S3 — из секретов, без Admin (бакет создаёт s3-init через мастер); S3 — только https
   s3:
     entrypoint: ["sh", "/s3-secure.sh"]
     command: []
     environment:
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:?set S3_ACCESS_KEY_ID}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:?set S3_SECRET_ACCESS_KEY}
+      S3_ACCESS_KEY_ID_FILE: /run/secrets/s3_access_key_id
+      S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_access_key
       S3_BUCKET: relay-files
+    secrets: [s3_access_key_id, s3_secret_access_key]
     volumes:
       - s3data:/data
       - ./secrets/tls:/certs:ro
@@ -123,12 +160,16 @@ services:
   s3-init:
     networks: [default, data]
 
+  # мастер-ключ — в окружение процесса meilisearch при старте (не в конфиг контейнера: `docker inspect` его не видит)
   search:
+    entrypoint: ["tini", "--", "sh", "-c", "MEILI_MASTER_KEY=\"$$(cat /run/secrets/meili_master_key)\" && export MEILI_MASTER_KEY && exec /bin/meilisearch"]
+    command: !reset []
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
+      MEILI_MASTER_KEY: !reset null
       MEILI_ENV: production
       MEILI_SSL_CERT_PATH: /certs/search.pem
       MEILI_SSL_KEY_PATH: /certs/search-key.pem
+    secrets: [meili_master_key]
     volumes:
       - meili:/meili_data
       - ./secrets/tls:/certs:ro
@@ -147,24 +188,26 @@ services:
       NODE_EXTRA_CA_CERTS: /certs/ca.pem
       KMS_PROVIDER: vault
       VAULT_ADDR: ${VAULT_ADDR:?set VAULT_ADDR (https)}
-      VAULT_TOKEN: ${VAULT_TOKEN:?set VAULT_TOKEN (the only holder of KMS credentials)}
+      VAULT_TOKEN_FILE: /run/secrets/vault_token   # единственный, у кого есть учётные данные KMS
       VAULT_TRANSIT_KEY: relay-chat-keys
       KEY_SERVICE_PORT: "7800"
       KEY_SERVICE_TLS_CERT: /certs/keys.pem
       KEY_SERVICE_TLS_KEY: /certs/keys-key.pem
-      KEY_SERVICE_TOKENS: server:${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER},worker:${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
+      KEY_SERVICE_TOKENS_FILE: /run/secrets/key_service_tokens
       KEY_SERVICE_UNWRAP_PER_MIN: "6000"
       # журнал аудита — цепочка с HMAC (auditLog.ts): ключ — только здесь и у того, кто проверяет журнал
-      KEY_SERVICE_AUDIT_KEY: ${KEY_SERVICE_AUDIT_KEY:?set KEY_SERVICE_AUDIT_KEY (32 bytes, base64)}
+      KEY_SERVICE_AUDIT_KEY_FILE: /run/secrets/key_service_audit_key
       KEY_SERVICE_AUDIT_FILE: /var/log/relay-keys/audit.log
       NODE_ENV: production
+    secrets: [vault_token, key_service_tokens, key_service_audit_key]
     networks: [keys, kms-egress]
 
   migrate:
     <<: *hardened
     restart: "no"
     environment:
-      <<: *tls-client
+      <<: *db
+    secrets: [pg_password]
     networks: [data]
 
   # сборка клиента — один раз, в том, который отдаёт proxy (исходники не монтируются)
@@ -182,17 +225,28 @@ services:
     <<: *hardened
     environment:
       <<: [*tls-client, *code-delivery]
+      # dev-значения базового файла — прочь (теги !reset из якорей не переносятся, поэтому здесь):
+      # и значение, и *_FILE — ошибка (secretFiles.ts)
+      S3_ACCESS_KEY_ID: !reset null
+      S3_SECRET_ACCESS_KEY: !reset null
+      MEILI_MASTER_KEY: !reset null
+      TELEGRAM_BOT_TOKEN: !reset null
+      TELEGRAM_WEBHOOK_SECRET: !reset null
       # звонки: публичный адрес TURN и общий с ним секрет учёток (обязательны в боевом режиме)
       RELAY_STUN_URLS: "stun:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478"
       RELAY_TURN_URLS: "turn:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478?transport=udp,turn:${RELAY_TURN_HOST}:3478?transport=tcp"
-      RELAY_TURN_SECRET: ${RELAY_TURN_SECRET:?set RELAY_TURN_SECRET}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET (32+ chars)}
+      RELAY_TURN_SECRET: !reset null
+      RELAY_TURN_SECRET_FILE: /run/secrets/turn_secret
+      LIVEKIT_API_KEY: !reset null
+      LIVEKIT_API_SECRET: !reset null
+      LIVEKIT_API_KEY_FILE: /run/secrets/livekit_api_key
+      LIVEKIT_API_SECRET_FILE: /run/secrets/livekit_api_secret
       PORT: "3000"
       TRUST_PROXY: "1"
-      MEILI_MASTER_KEY: ""
-      MEILI_API_KEY: ${MEILI_SEARCH_KEY:?set MEILI_SEARCH_KEY (bun apps/server/src/dev/meiliKeys.ts)}
-      KEY_SERVICE_TOKEN: ${KEY_TOKEN_SERVER:?set KEY_TOKEN_SERVER}
+      MEILI_API_KEY_FILE: /run/secrets/meili_search_key
+      KEY_SERVICE_TOKEN_FILE: /run/secrets/key_token_server
+    secrets: [pg_password, valkey_password, s3_access_key_id, s3_secret_access_key, meili_search_key, key_token_server,
+              turn_secret, livekit_api_key, livekit_api_secret, telegram_bot_token, telegram_webhook_secret]
     networks: [default, data, search, keys]
     depends_on: [keys]
 
@@ -203,24 +257,37 @@ services:
     tmpfs: ["/tmp:size=2g,mode=1777"]
     environment:
       <<: [*tls-client, *code-delivery]
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
-      KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
+      # dev-значения базового файла — прочь (теги !reset из якорей не переносятся, поэтому здесь):
+      # и значение, и *_FILE — ошибка (secretFiles.ts)
+      S3_ACCESS_KEY_ID: !reset null
+      S3_SECRET_ACCESS_KEY: !reset null
+      MEILI_MASTER_KEY: !reset null
+      TELEGRAM_BOT_TOKEN: !reset null
+      TELEGRAM_WEBHOOK_SECRET: !reset null
+      MEILI_MASTER_KEY_FILE: /run/secrets/meili_master_key
+      KEY_SERVICE_TOKEN_FILE: /run/secrets/key_token_worker
+    secrets: [pg_password, valkey_password, s3_access_key_id, s3_secret_access_key, meili_master_key, key_token_worker,
+              telegram_bot_token, telegram_webhook_secret]
     networks: [default, data, search, keys]
     depends_on: [keys]
 
-  # LiveKit наружу — только медиапорты; ключ и внешний адрес — обязательны
+  # LiveKit наружу — только медиапорты; ключи — файлом (--key-file: «ключ: секрет»), внешний адрес — обязателен
   livekit:
-    command: !override ["--config", "/etc/livekit.yaml", "--node-ip", "${LIVEKIT_NODE_IP:?set LIVEKIT_NODE_IP (public IP)}"]
-    environment: !override
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}"
+    command: !override ["--config", "/etc/livekit.yaml", "--key-file", "/run/secrets/livekit_keys", "--node-ip", "${LIVEKIT_NODE_IP:?set LIVEKIT_NODE_IP (public IP)}"]
+    environment: !override {}
+    secrets: [livekit_keys]
     ports: !override ["7881:7881/tcp", "50000-50060:50000-50060/udp"]
     restart: unless-stopped
 
-  # TURN наружу — только его порты; секрет и внешний адрес — обязательны
+  # TURN наружу — только его порты; секрет — файлом (start.sh кладёт его в конфиг, не в аргументы), адрес — обязателен.
+  # Старт от root — прочитать секрет; turnserver сам переходит на nobody (--proc-user)
   turn:
+    user: "0"
     environment: !override
-      RELAY_TURN_SECRET: ${RELAY_TURN_SECRET:?set RELAY_TURN_SECRET}
+      RELAY_TURN_SECRET_FILE: /run/secrets/turn_secret
       RELAY_TURN_EXTERNAL_IP: ${RELAY_TURN_EXTERNAL_IP:?set RELAY_TURN_EXTERNAL_IP}
+    command: ["--proc-user=nobody", "--proc-group=nogroup"]
+    secrets: [turn_secret]
     ports: !override ["3478:3478/udp", "3478:3478/tcp", "49160-49200:49160-49200/udp"]
     restart: unless-stopped
 

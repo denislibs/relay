@@ -1,6 +1,8 @@
 // Выпустить ключ Meilisearch «только поиск» для процесса server (MEILI_API_KEY в docker-compose.secure.yml).
 // Запуск (мастер-ключ — из окружения):  MEILI_URL=… MEILI_MASTER_KEY=… bun apps/server/src/dev/meiliKeys.ts
 // Ключ с постоянным uid: повторный запуск вернёт тот же ключ, а не создаст второй.
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import '../secretFiles';
 import { meili } from '../search/meili';
 
 const UID = '6f1b0c52-5e2a-4c1e-9a7d-0000000000a1';

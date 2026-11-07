@@ -13,6 +13,8 @@ COPY . .
 RUN bun apps/web/build.ts
 # не от root (INFRA-5): ffmpeg разбирает чужие файлы; процессу не нужно ничего, кроме чтения /app и /tmp
 RUN chown -R bun:bun /app/apps/web/dist
+# журнал аудита сервиса ключей (том keys-audit, docker-compose.secure.yml): пустой том берёт владельца из образа
+RUN install -d -o bun -g bun -m 700 /var/log/relay-keys
 USER bun
 EXPOSE 3000
 CMD ["bun", "apps/server/src/main.ts"]

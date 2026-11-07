@@ -6,17 +6,28 @@
 # удалённое не открыть ни из какого бэкапа данных. Храните две части в разных местах и с разными правами.
 #
 #   DATABASE_URL=postgres://… OUT=/backups ./tools/backup/pg-backup.sh
+#   PG_DUMP="docker compose … exec -T postgres pg_dump -U relay -d relay" OUT=… ./tools/backup/pg-backup.sh
+#     — pg_dump внутри контейнера (deploy/backup.sh): тогда DATABASE_URL не нужен
 set -eu
 umask 077   # дампы — только владельцу (CRYPTO-16)
-: "${DATABASE_URL:?set DATABASE_URL}"
+[ -n "${PG_DUMP:-}" ] || : "${DATABASE_URL:?set DATABASE_URL}"
 OUT="${OUT:-./backups}"; DATA_DAYS="${DATA_DAYS:-30}"; KEYS_DAYS="${KEYS_DAYS:-7}"
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$OUT/data" "$OUT/keys"
-# AGE_DATA / AGE_KEYS — получатели age (разные ключи): дампы шифруются, одна утечка не даёт обоих (CRYPTO-16)
-pg_dump "$DATABASE_URL" --format=custom --exclude-schema=keys --file="$OUT/data/relay-data-$stamp.dump"
-pg_dump "$DATABASE_URL" --format=custom --schema=keys --file="$OUT/keys/relay-keys-$stamp.dump"
-if [ -n "${AGE_DATA:-}" ]; then age -r "$AGE_DATA" -o "$OUT/data/relay-data-$stamp.dump.age" "$OUT/data/relay-data-$stamp.dump" && rm "$OUT/data/relay-data-$stamp.dump"; fi
-if [ -n "${AGE_KEYS:-}" ]; then age -r "$AGE_KEYS" -o "$OUT/keys/relay-keys-$stamp.dump.age" "$OUT/keys/relay-keys-$stamp.dump" && rm "$OUT/keys/relay-keys-$stamp.dump"; fi
+
+pgdump() { if [ -n "${PG_DUMP:-}" ]; then $PG_DUMP "$@"; else pg_dump "$DATABASE_URL" "$@"; fi; }
+# AGE_DATA / AGE_KEYS — получатели age (разные ключи): дампы шифруются, одна утечка не даёт обоих (CRYPTO-16).
+# С получателем дамп идёт в age потоком — расшифрованный на диск не ложится. Ошибку pg_dump в конвейере видно
+# по файлу-метке (в POSIX sh нет pipefail).
+save() {
+  file="$1"; recipient="$2"; shift 2
+  if [ -z "$recipient" ]; then pgdump --format=custom "$@" > "$file"; return; fi
+  failed="$file.failed"; rm -f "$failed"
+  { pgdump --format=custom "$@" || : > "$failed"; } | age -r "$recipient" -o "$file.age"
+  if [ -e "$failed" ]; then rm -f "$failed" "$file.age"; echo "pg_dump failed: $file" >&2; return 1; fi
+}
+save "$OUT/data/relay-data-$stamp.dump" "${AGE_DATA:-}" --exclude-schema=keys
+save "$OUT/keys/relay-keys-$stamp.dump" "${AGE_KEYS:-}" --schema=keys
 # сроки хранения в минутах, а не -mtime: «+7» у find значит «8 и больше суток» (CRYPTO-16)
 find "$OUT/keys" -name 'relay-keys-*.dump*' -mmin +"$((KEYS_DAYS * 1440))" -delete
 find "$OUT/data" -name 'relay-data-*.dump*' -mmin +"$((DATA_DAYS * 1440))" -delete

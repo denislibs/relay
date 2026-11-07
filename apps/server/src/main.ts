@@ -1,3 +1,5 @@
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import './secretFiles';
 import { createServer } from './http';
 import { initPeerKeys } from './crypto/peerKey';
 import { watchMigrations } from './migrate';

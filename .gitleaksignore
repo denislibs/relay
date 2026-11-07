@@ -1,0 +1,11 @@
+# Находки gitleaks в истории, проверенные руками: не секреты (fingerprint = коммит:файл:правило:строка).
+# Sec-WebSocket-Key из примера RFC 6455 в тестах и плане
+a278712708769285cf81e06120794dcbbdec6853:apps/server/test/flood.test.ts:generic-api-key:127
+f8a790e8403bc523692eb8025e8580cebca3093a:apps/server/test/e2e.test.ts:generic-api-key:64
+22054962460a51c97261a60935d7e0b5f9823bcd:docs/plans/2026-10-16-relay-server-core.md:generic-api-key:1520
+# тестовый секрет LiveKit (только в тесте)
+192c054b15b1b874495aee6f2ce6c0a20835c20c:apps/server/test/groupCalls.test.ts:generic-api-key:12
+# dev-ключ FakeKms «relay-dev-master-key-not-for-prod» (base64), только dev и тесты
+cc51cbc510def6bc77b36f9780c4bb4005c76a78:apps/server/src/crypto/kms.ts:generic-api-key:16
+# AAGUID менеджеров паролей — публичные идентификаторы
+519ef351b5c92e662d7b03e659fef832aba486f4:apps/server/src/domain/passkeys.ts:generic-api-key:30

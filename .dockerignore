@@ -7,6 +7,15 @@ secrets
 docker/nginx/certs
 .env
 .env.*
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.age
+**/backups
+deploy/state
+.gitleaks*
 .playwright-mcp
 .claude
 apps/web/dist
+docker-compose.override.yml

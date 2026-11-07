@@ -1,3 +1,5 @@
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import './secretFiles';
 import { watch } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';

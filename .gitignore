@@ -1,5 +1,4 @@
 node_modules
-.env
 apps/web/dist
 packages/relay-ui/tokens.css
 storybook-static
@@ -8,3 +7,19 @@ apps/server/assets/
 .adversarial-review/
 # ключи и сертификаты развёртывания (tools/tls/make-internal-certs.sh) — только на сервере
 secrets/
+# состояние развёртывания на сервере (deploy/deploy.sh): текущий и прежний тег, журнал, замок
+deploy/state/
+# секреты — никогда в git (docs/deploy.md, «Секреты»). Пример настроек без значений — .env.example
+.env
+.env.*
+!.env.example
+deploy/*.env
+*.pem
+*-key.pem
+*.key
+*.age
+backups/
+# вывод bao operator init и токены OpenBao
+relay-openbao-init*.json
+*bao-init*.json
+*.bao-token

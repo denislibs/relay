@@ -37,8 +37,10 @@ export function assertTransportSecure(env: Env = process.env): void {
   if (env.LOG_LOGIN_CODES === '1') problems.push('LOG_LOGIN_CODES=1 is not allowed in production');
   // коды входа: только настоящий канал (telegram) и с полной настройкой — иначе регистрация молча не работала бы
   problems.push(...codeDeliveryProblems(env), ...telegramLoginProblems(env));
+  // процесс без базы (сервис ключей: только KMS) — проверять нечего
   const db = dbSsl(env);
-  if (db === false || db === 'require') problems.push('database: DB_SSL=verify-full with DB_CA');
+  const usesDb = !!(env.DATABASE_URL || env.DB_SSL);
+  if (usesDb && (db === false || db === 'require')) problems.push('database: DB_SSL=verify-full with DB_CA');
   if (env.VALKEY_URL && !env.VALKEY_URL.startsWith('rediss://')) problems.push('valkey: VALKEY_URL=rediss://…');
   for (const k of ['S3_ENDPOINT', 'MEILI_URL', 'KEY_SERVICE_URL', 'VAULT_ADDR']) {
     if (env[k] && !env[k]!.startsWith('https://')) problems.push(`${k}: https://…`);

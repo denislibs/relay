@@ -1,0 +1,147 @@
+# Боевой сервер Relay (denigram.site): третий слой поверх docker-compose.yml и docker-compose.secure.yml.
+#   deploy/compose.sh <команда>    — то же, что docker compose -p relay -f docker-compose.yml
+#                                    -f docker-compose.secure.yml -f deploy/docker-compose.prod.yml (RELAY_TAG — из deploy/state)
+# Устройство и первый запуск — docs/deploy.md. Что здесь иначе, чем в docker-compose.secure.yml:
+#   - образы собирает CI (.github/workflows/deploy.yml): relay-server (server, worker, keys, migrate) и relay-proxy
+#     (nginx со сборкой клиента внутри — вместо сервиса web и тома webdist); тег — git sha, RELAY_TAG;
+#   - OpenBao (KMS главного ключа) на этом же хосте: боевой режим, хранилище raft на своём томе, TLS внутреннего CA;
+#     сеть bao — только он и сервис ключей (VAULT_ADDR=https://openbao:8200), выхода наружу нет;
+#   - данные SeaweedFS — на отдельном разделе хоста (/srv/relay-s3), а не в томе;
+#   - TURN: шире диапазон портов релея и полоса на сессию (видео); внешние адреса TURN и LiveKit — из .env;
+#   - healthcheck у server, worker, keys и proxy — по ним deploy.sh ждёт готовности; restart у всех долгоживущих.
+
+x-relay-server: &relay-server
+  image: ${RELAY_REGISTRY:-ghcr.io/denislibs}/relay-server:${RELAY_TAG:?set RELAY_TAG (deploy/deploy.sh sets it)}
+  build: !reset null
+
+# стикеры и эмодзи (ASSETS_DIR) — вне git и образа; пустой каталог — без них (stickers/files.ts)
+x-assets: &assets ${RELAY_ASSETS_DIR:-/srv/relay-assets}:/app/apps/server/assets:ro
+
+networks:
+  # OpenBao ↔ сервис ключей, больше никого; наружу не выходит
+  bao:
+    internal: true
+
+services:
+  # главный ключ (Transit relay-chat-keys). После старта — запечатан: deploy/bao-unseal.sh (ключи — у владельца).
+  # Первый раз: deploy/bao-init.sh. Ключ TLS доступен только root на хосте — копия с правами openbao при старте.
+  openbao:
+    image: openbao/openbao:2.7.2
+    # старт от root только ради копии ключа TLS (на хосте он root/600); дальше entrypoint образа сам переходит
+    # на пользователя openbao (su-exec) — сервер работает не от root
+    user: "0"
+    entrypoint: ["sh", "-c", "install -d -o openbao -m 700 /run/bao && install -o openbao -m 600 /tls/bao.pem /tls/bao-key.pem /run/bao/ && exec docker-entrypoint.sh \"$$@\"", "--"]
+    command: ["server"]
+    environment:
+      BAO_ADDR: https://127.0.0.1:8200   # для bao внутри контейнера: deploy/bao-*.sh, healthcheck
+      BAO_CACERT: /tls/ca.pem
+      SKIP_CHOWN: "1"                     # каталоги образа и так принадлежат openbao; файловая система — только чтение
+    volumes:
+      - ./docker/openbao/openbao.hcl:/openbao/config/relay.hcl:ro
+      - ./secrets/tls/bao.pem:/tls/bao.pem:ro
+      - ./secrets/tls/bao-key.pem:/tls/bao-key.pem:ro
+      - ./secrets/tls/ca.pem:/tls/ca.pem:ro
+      - openbao-data:/openbao/file
+    read_only: true
+    tmpfs: ["/run/bao:size=1m", "/tmp:size=64m"]   # /tmp — снимок raft для бэкапа (deploy/backup.sh), пока выгружается
+    # здоров = распечатан: bao status — 0, запечатан — 2
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    networks: [bao]
+    restart: unless-stopped
+
+  keys:
+    <<: *relay-server
+    environment:
+      VAULT_ADDR: https://openbao:8200
+    # жив = принимает TLS с верным сертификатом. Без HTTP-запроса: запрос без токена лёг бы в журнал аудита
+    # отказом — каждые 10 с
+    healthcheck:
+      test: ["CMD", "bun", "-e", "const s = require('node:tls').connect({ host: 'keys', port: 7800, servername: 'keys' }, () => { s.end(); process.exit(0); }); s.on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks: !override [keys, bao]
+    depends_on: [openbao]
+
+  migrate:
+    <<: *relay-server
+
+  server:
+    <<: *relay-server
+    environment:
+      RP_ORIGIN: https://${RELAY_DOMAIN:?set RELAY_DOMAIN (denigram.site)}   # passkeys: rpID — домен
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@${RELAY_DOMAIN}}
+    volumes:
+      - *assets
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  worker:
+    <<: *relay-server
+    environment:
+      HEALTH_FILE: /tmp/relay-worker.alive   # worker.ts обновляет раз в 15 с, когда запуск прошёл
+    volumes:
+      - *assets
+    healthcheck:
+      test: ["CMD-SHELL", "test -n \"$$(find /tmp/relay-worker.alive -mmin -1 2>/dev/null)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  # клиент собран в образе relay-proxy — сборка при старте не нужна
+  web:
+    profiles: ["never"]
+
+  proxy:
+    image: ${RELAY_REGISTRY:-ghcr.io/denislibs}/relay-proxy:${RELAY_TAG:?set RELAY_TAG}
+    build: !reset null
+    volumes: !override
+      - ./docker/nginx/production.conf:/etc/nginx/http.d/default.conf:ro
+      - ./docker/nginx/security-headers.conf:/etc/nginx/snippets/relay-security.conf:ro
+      - ./docker/nginx/hsts.conf:/etc/nginx/snippets/relay-hsts.conf:ro
+      # сертификат домена: certbot на хосте, хук продления копирует сюда (deploy/certbot-deploy-hook.sh)
+      - ./secrets/public:/etc/nginx/certs:ro
+      - ./secrets/tls/ca.pem:/etc/nginx/internal-ca.pem:ro
+      # HTTP-01 Let's Encrypt: certbot --webroot пишет сюда, nginx отдаёт /.well-known/acme-challenge/ на :80
+      - ${RELAY_ACME_DIR:-/srv/relay-acme}:/srv/acme:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--no-check-certificate", "https://127.0.0.1/version.json"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    depends_on: !override
+      server: { condition: service_started }
+      s3: { condition: service_healthy }
+      livekit: { condition: service_started }
+
+  # вложения — на отдельном разделе хоста (20 ГБ ext4), а не в томе docker
+  s3:
+    volumes:
+      - ${RELAY_S3_DIR:-/srv/relay-s3}:/data
+    restart: unless-stopped
+
+  # TURN: релей 49152–49952 (в пределах открытого на хосте 49152–65535 и ниже медиапортов LiveKit 50000–50060);
+  # max-bps — байт/с на сессию (≈20 Мбит/с: видео звонка с запасом). Флаги перекрывают turnserver.conf (start.sh)
+  turn:
+    command: ["--proc-user=nobody", "--proc-group=nogroup", "--min-port=49152", "--max-port=49952", "--max-bps=2500000"]
+    ports: !override ["3478:3478/udp", "3478:3478/tcp", "49152-49952:49152-49952/udp"]
+
+  postgres:
+    restart: unless-stopped
+  valkey:
+    restart: unless-stopped
+  search:
+    restart: unless-stopped
+
+volumes:
+  openbao-data: {}

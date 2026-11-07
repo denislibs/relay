@@ -1,3 +1,5 @@
+// секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
+import './secretFiles';
 import { sql } from './db';
 import { initPeerKeys } from './crypto/peerKey';
 import { SLOW_KINDS } from './jobs/kinds';
@@ -47,6 +49,13 @@ const telegram = !telegramLoginEnabled() ? null
   : process.env.TELEGRAM_WEBHOOK_URL ? (await setupWebhook().catch((e) => console.error(`telegram login: setWebhook — ${(e as Error).message}`)), null)
   : startPolling();
 console.log('relay worker started');
+// «жив» для healthcheck (deploy/docker-compose.prod.yml): запуск прошёл, цикл событий крутится — файл свежий
+const healthFile = process.env.HEALTH_FILE;
+if (healthFile) {
+  const beat = () => { Bun.write(healthFile, String(Date.now())).catch((e) => console.error('worker: health file:', e)); };
+  beat();
+  setInterval(beat, 15_000).unref();
+}
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, async () => {

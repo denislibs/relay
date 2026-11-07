@@ -1,0 +1,214 @@
+# Выкат на denigram.site (docs/deploy.md):
+#   push в master → ci (тот же ci.yml) → сборка и публикация образов ghcr.io/denislibs/relay-{server,proxy}:<sha>
+#   (+ latest) → по SSH на сервер «deploy <sha>» (deploy/ci-entry.sh → deploy.sh: сам откатывается при ошибке) →
+#   проверка в браузере (tools/ci/browser-smoke.mjs); не прошла — «rollback» на прежнюю версию.
+#   Run workflow с tag=<sha> — «rollback <sha>»: выкатить уже собранную версию без CI и сборки.
+# Секреты — только в GitHub Environment `production`: DEPLOY_HOST, DEPLOY_SSH_KEY (закрытый ключ CI; на сервере он
+# заперт в deploy/ci-entry.sh), DEPLOY_KNOWN_HOSTS (ssh-keyscan сервера, проверенный руками). Значения в лог не
+# попадают: GitHub маскирует секреты, сами шаги их не печатают.
+name: deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "git sha to deploy (rollback to an already built version). Empty — build and deploy master head"
+        required: false
+        default: ""
+
+# выкаты никогда не идут одновременно и не отменяют друг друга: следующий ждёт
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io/denislibs
+  PLAYWRIGHT_VERSION: 1.65.0
+
+jobs:
+  # собирается и выкатывается только master; другая ветка через Run workflow — нет (а готовый tag — да)
+  ci:
+    if: inputs.tag == '' && github.ref == 'refs/heads/master'
+    uses: ./.github/workflows/ci.yml
+
+  images:
+    name: build & push images
+    needs: ci
+    if: inputs.tag == '' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: tags
+        id: tags
+        env:
+          REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+        run: |
+          for image in relay-server relay-proxy; do
+            t="$REGISTRY/$image:$SHA"
+            [ "$REF" = refs/heads/master ] && t="$t,$REGISTRY/$image:latest"
+            echo "${image#relay-}=$t" >> "$GITHUB_OUTPUT"
+          done
+      - name: relay-server
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: apps/server/Dockerfile
+          build-args: BUILD_ID=${{ github.sha }}   # сборка = тег образа = /version.json клиента
+          push: true
+          tags: ${{ steps.tags.outputs.server }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=relay-server
+          cache-to: type=gha,mode=max,scope=relay-server
+      - name: relay-proxy
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: docker/nginx
+          build-contexts: repo=.
+          target: production
+          build-args: BUILD_ID=${{ github.sha }}
+          push: true
+          tags: ${{ steps.tags.outputs.proxy }}
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha,scope=relay-proxy
+          cache-to: type=gha,mode=max,scope=relay-proxy
+
+  deploy:
+    name: deploy to denigram.site
+    needs: images
+    # сборка пропущена (выкат готового тега) — тоже выкатываем; упала — нет
+    if: ${{ !cancelled() && (needs.images.result == 'success' || (needs.images.result == 'skipped' && inputs.tag != '')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://denigram.site
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: version
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          tag="${INPUT_TAG:-$SHA}"
+          case "$tag" in *[!0-9a-f]* | "") echo "::error::tag must be a hex git sha, got '$tag'"; exit 1 ;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: images exist
+        if: inputs.tag != ''
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin >/dev/null
+          for image in relay-server relay-proxy; do
+            docker manifest inspect "$REGISTRY/$image:$TAG" >/dev/null || { echo "::error::$REGISTRY/$image:$TAG not found (images are tagged with the full sha)"; exit 1; }
+          done
+      - name: ssh key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts && chmod 644 ~/.ssh/known_hosts
+      # ключ CI на сервере может только это: deploy <sha> | rollback [<sha>] | status (deploy/ci-entry.sh)
+      - name: deploy
+        id: deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ACTION: ${{ inputs.tag != '' && 'rollback' || 'deploy' }}
+        run: |
+          set +e
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "deploy@$DEPLOY_HOST" "$ACTION $TAG" 2>&1 | tee deploy.log
+          code=${PIPESTATUS[0]}
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.deploy.outputs.code == '0'
+        with:
+          sparse-checkout: tools/ci
+      # настоящий браузер: оболочка приложения, Service Worker, консоль без ошибок, /health, /ready, сборка = sha
+      - name: browser smoke
+        id: smoke
+        if: steps.deploy.outputs.code == '0'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          pw="$RUNNER_TEMP/pw"
+          mkdir -p "$pw" && cp tools/ci/browser-smoke.mjs "$pw/"
+          npm install --silent --no-audit --no-fund --prefix "$pw" "playwright@$PLAYWRIGHT_VERSION" >/dev/null
+          (cd "$pw" && npx playwright install --with-deps chromium >/dev/null)
+          set +e
+          node "$pw/browser-smoke.mjs" https://denigram.site "$TAG" 2>&1 | tee smoke.log
+          code=${PIPESTATUS[0]}
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      # браузер увидел поломку, которую не поймали проверки на сервере — назад на прежнюю версию
+      - name: rollback after failed browser smoke
+        id: rollback
+        if: failure() && steps.smoke.outputs.code != '' && steps.smoke.outputs.code != '0'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          set +e
+          ssh -i ~/.ssh/deploy -o BatchMode=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 \
+            "deploy@$DEPLOY_HOST" "rollback" 2>&1 | tee rollback.log
+          code=${PIPESTATUS[0]}
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - name: summary
+        if: always()
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          CODE: ${{ steps.deploy.outputs.code }}
+          SMOKE: ${{ steps.smoke.outputs.code }}
+          ROLLBACK: ${{ steps.rollback.outputs.code }}
+        run: |
+          case "$CODE" in
+            0) result="✅ deployed" ;;
+            1) result="❌ failed — rolled back to the previous version (or nothing was changed)" ;;
+            2) result="🔥 failed AND rollback failed — manual action needed" ;;
+            *) result="❌ did not run deploy.sh" ;;
+          esac
+          if [ "$CODE" = 0 ] && [ -n "$SMOKE" ] && [ "$SMOKE" != 0 ]; then
+            if [ "$ROLLBACK" = 0 ]; then result="❌ browser smoke failed — rolled back to the previous version"
+            else result="🔥 browser smoke failed AND rollback failed — manual action needed"; fi
+          fi
+          {
+            echo "### Deploy \`$TAG\` → denigram.site"
+            echo
+            echo "$result (deploy: ${CODE:-none}, browser smoke: ${SMOKE:-not run}, rollback: ${ROLLBACK:-not needed})"
+            for f in deploy.log smoke.log rollback.log; do
+              [ -f "$f" ] || continue
+              echo
+              echo "<details><summary>$f</summary>"
+              echo
+              echo '```'
+              tail -n 80 "$f"
+              echo '```'
+              echo '</details>'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - if: always()
+        run: rm -f ~/.ssh/deploy
