@@ -17,6 +17,11 @@ const send = (chatId: number, flags: FlagsIn) => { setFlags(chatId, flags).catch
 export const isPinned = (c: Chat) => typeof f(c).pinnedAt === 'number';
 export const isArchived = (c: Chat) => !!f(c).archived;
 export const hasUnreadMark = (c: Chat) => !!f(c).unreadMark;
+/**
+ * Пустое «Избранное»: ни сообщений, ни черновика, не закреплено. В списке его нет (как в Telegram: строка появляется
+ * с первым сообщением), но строка в данных остаётся: открыть его из меню можно, шапка и лента читают её (findChat).
+ */
+export const isEmptySaved = (c: Chat) => { const x = (c ?? {}) as { saved?: unknown; last?: unknown; draft?: unknown }; return !!x.saved && !x.last && !x.draft && !isPinned(c); };
 
 const chatById = (id: number) => getGlobal().chats.find((c) => c.id === id);
 

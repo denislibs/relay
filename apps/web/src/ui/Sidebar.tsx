@@ -4,7 +4,7 @@ import { ArchivedRow, Avatar, ChatRow, Highlight, Icon, MenuPopover, Presence, S
 import type { Item } from '@relay/sync-engine/src/types';
 import { loadMoreChats, openChat, openSavedChat, prepareChat } from '../data';
 import { pressOpen } from './press';
-import { clearUnreadMark, hasUnreadMark, isArchived, isPinned, markUnread, toggleArchive, togglePin } from '../chatFlags';
+import { clearUnreadMark, hasUnreadMark, isArchived, isEmptySaved, isPinned, markUnread, toggleArchive, togglePin } from '../chatFlags';
 import { usePerson } from '../people';
 import { closeSearch, openSearch } from '../search';
 import { GlobalSearch } from './search/GlobalSearch';
@@ -228,6 +228,7 @@ export function Sidebar() {
     // архив — не в списках (только под строкой «Архив»; явно добавленный в папку — проверяет inFolder);
     // закреплённый — всегда, даже старше загруженного диапазона (движок грузит закреплённые сразу)
     return chats.filter((c) =>
+      !isEmptySaved(c) &&
       (f ? true : !isArchived(c)) &&
       (Date.parse(c.lastAt as string) >= loadedFrom || isPinned(c)) &&
       (!f || inFolder(f, c as never, ctx)) &&
@@ -255,7 +256,7 @@ export function Sidebar() {
 
   // одна папка: свой список и своя прокрутка (страница SlideStack)
   // строка «Архив» над «Все» (как в Telegram): имена первых архивных, непрочитанные — ярче; счётчик — чаты с непрочитанным
-  const archived = chats.filter(isArchived);
+  const archived = chats.filter((c) => isArchived(c) && !isEmptySaved(c));
   const archiveNames = archived.slice(0, 5).map((c) => ({ name: String(c.title || 'Чат №' + c.id), unread: (c.unread as number) > 0 || hasUnreadMark(c) }));
   const archiveUnread = archived.filter((c) => (c.unread as number) > 0 || hasUnreadMark(c)).length;
   const renderFolder = (key: string) => {

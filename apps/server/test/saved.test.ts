@@ -121,10 +121,10 @@ test('deleting removes the history for real and hides the chat until it is opene
   // прошлое не открыть: версии ключа, которой зашифрована история, больше нет (shredChatHistory)
   expect((await sql`select 1 from keys.chat_keys where chat_id = ${chat} and version = 1`).length).toBe(0);
 
-  expect(await openSavedChat(a)).toBe(chat);   // тот же чат, снова в списке, пустой
+  expect(await openSavedChat(a)).toBe(chat);   // тот же чат, строка снова отдаётся (открыть, шапка), пустая
   const row = (await listChats(a)).find((c) => c.id === chat)!;
   expect(row).toMatchObject({ saved: true, last: null, pinned: [] });
-  expect(await countChats(a)).toBe(before);
+  expect(await countChats(a)).toBe(before - 1);   // пустое — клиент в списке не показывает, в число диалогов не входит
   // удалили и не открывали, но написали с другого устройства — чат вернулся с новым сообщением
   await send(a, chat, 'новое');
   await deleteDirectChat(a, chat, true);
@@ -165,4 +165,20 @@ test('over HTTP: POST /chats/saved is idempotent; a stranger can neither read no
   const add = await call(x, 'POST', `/groups/${chat}/members`, { members: [] });
   expect(add.status).toBeGreaterThanOrEqual(400);
   expect((await sql`select user_id from chat_members where chat_id = ${chat}`).map((m) => Number(m.user_id))).toEqual([a.userId]);
+});
+
+test('empty «Избранное» is not counted as a dialog until it has a message, a draft or a pin (as in Telegram)', async () => {
+  const a = await makeUser('Анна');
+  const base = await countChats(a);
+  const chat = await openSavedChat(a);
+  expect((await listChats(a)).find((c) => c.id === chat)).toMatchObject({ saved: true, last: null });   // строка для клиента есть
+  expect(await countChats(a)).toBe(base);
+  await setChatFlags(a, chat, { pinned: true });
+  expect(await countChats(a)).toBe(base + 1);
+  await setChatFlags(a, chat, { pinned: false });
+  expect(await countChats(a)).toBe(base);
+  const { message } = await send(a, chat, 'первая заметка');
+  expect(await countChats(a)).toBe(base + 1);
+  await deleteMessage(a, chat, message.id);
+  expect(await countChats(a)).toBe(base);
 });
