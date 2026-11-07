@@ -593,6 +593,8 @@ html[data-anim="0"] .app-chatcol, html[data-anim="0"] .app-chatcol-below, html[d
 .auth-steps li { counter-increment: step; display: grid; grid-template-columns: 22px 1fr; gap: 12px; align-items: start; font: 400 15px/21px var(--font-sans); color: var(--ink); }
 .auth-steps li::before { content: counter(step); display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 50%; background: color-mix(in srgb, var(--brand) 16%, transparent); color: var(--brand-text); font: 700 12px/1 var(--font-sans); }
 /* паскей: проявляется, когда готов challenge */
+.auth-tg-open { text-decoration: none; box-sizing: border-box; }   /* ссылка-кнопка на бота: открывает Telegram (приложение или t.me) */
+.auth-tg-wait { opacity: .5; cursor: default; pointer-events: none; }
 .auth-passkey { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows .25s var(--ease-out), opacity .25s; }
 .auth-passkey > div { overflow: hidden; display: flex; flex-direction: column; align-items: center; }
 .auth-passkey-ready { grid-template-rows: 1fr; opacity: 1; }

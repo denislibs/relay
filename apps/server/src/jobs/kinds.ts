@@ -115,8 +115,8 @@ register('mail.recovery', async (p: { to: string; expiresAt?: string; secret: { 
 });
 
 // код входа или регистрации внешним каналом (CODE_DELIVERY=telegram, domain/codeDelivery.ts): после коммита, с повторами
-register('code.deliver', async (p: { to: string; kind: CodeKind; expiresAt?: string; secret: { code: string } }) => {
-  await deliverExternal({ to: p.to, kind: p.kind, code: p.secret.code, expiresAt: p.expiresAt });
+register('code.deliver', async (p: { to: string; kind: CodeKind; expiresAt?: string; phone?: string; secret: { code: string } }) => {
+  await deliverExternal({ to: p.to, kind: p.kind, code: p.secret.code, expiresAt: p.expiresAt, phone: p.phone });
 });
 
 export const SWEEP_EVERY_SEC = 3600;

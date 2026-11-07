@@ -5,7 +5,7 @@ import { bindProof, type DeviceProof } from '@relay/sync-engine/src/device';
  * Шаги, после которых может появиться сеанс (и QR/паскей, чей вызов привязан к устройству): к ним — ключ устройства
  * с подписью (device.ts: bindProof). Сеанс создаётся привязанным — его cookie без ключа бесполезен с первого запроса.
  */
-const DEVICE_STEPS = new Set(['/auth/signin', '/auth/signup', '/auth/password/check', '/auth/password/recover/check', '/auth/qr', '/auth/qr/poll', '/auth/passkey/options', '/auth/passkey/finish']);
+const DEVICE_STEPS = new Set(['/auth/signin', '/auth/signup', '/auth/password/check', '/auth/password/recover/check', '/auth/qr', '/auth/qr/poll', '/auth/telegram', '/auth/telegram/poll', '/auth/passkey/options', '/auth/passkey/finish']);
 /** Ключ недоступен (IndexedDB или WebCrypto выключены) — вход как раньше, сеанс привяжется при первом обновлении доступа. */
 const proofFor = (path: string): Promise<DeviceProof | null> => (DEVICE_STEPS.has(path) ? bindProof().catch(() => null) : Promise.resolve(null));
 
@@ -58,6 +58,7 @@ export const ERRORS: Record<string, string> = {
   recovery_unavailable: 'Почта для восстановления не задана',
   passkey_not_found: 'Этот паскей не привязан к аккаунту',
   passkey_invalid: 'Не удалось войти с паскеем',
+  telegram_unavailable: 'Вход через Telegram сейчас недоступен',
   device_invalid: 'Не удалось подтвердить это устройство — обновите страницу и попробуйте снова',
   bad_frame: 'Проверьте введённые данные',
   internal: 'Ошибка на сервере — попробуйте ещё раз',

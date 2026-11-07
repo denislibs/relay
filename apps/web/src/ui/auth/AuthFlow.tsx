@@ -8,6 +8,7 @@ import { PasswordCard, RecoverCard } from './PasswordCard';
 import { PhoneCard } from './PhoneCard';
 import { QrCard } from './QrCard';
 import { SignUpCard } from './SignUpCard';
+import { TelegramCard } from './TelegramCard';
 import { toggleNight } from '../../theme';
 import { useWallpaper } from '../../wallpapers';
 import { useWallpaperImage } from '../../wallpaperImage';
@@ -19,13 +20,14 @@ import { useWallpaperImage } from '../../wallpaperImage';
 export type Card =
   | { name: 'phone'; phone?: string }
   | { name: 'qr' }
+  | { name: 'telegram' }
   | { name: 'code'; phone: string; attemptId: string; via: 'app' | 'none'; length: number; devCode?: string; sentAt: number }
   | { name: 'password'; pendingId: string; hint: string }
   | { name: 'recover'; pendingId: string; hint: string; emailPattern: string }
   | { name: 'signup'; pendingId: string; phone: string }
   | { name: 'dev' };
 
-type Flow = { go(card: Card, opts?: { instant?: boolean }): void; finish(step: Step, from?: { phone?: string }): void; dev: boolean };
+type Flow = { go(card: Card, opts?: { instant?: boolean }): void; finish(step: Step, from?: { phone?: string }): void; dev: boolean; telegram: boolean };
 const FlowCtx = createContext<Flow>(null as unknown as Flow);
 export const useFlow = () => useContext(FlowCtx);
 
@@ -46,12 +48,13 @@ export function AuthFlow() {
   const [phase, setPhase] = useState<'idle' | 'out' | 'in'>('idle');
   const [leaving, setLeaving] = useState(false);
   const [dev, setDev] = useState(false);
+  const [telegram, setTelegram] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>();
   // обои — как в приложении (узор и цвета этого устройства): после входа тот же фон, без смены картинки
   const { wp, dark, key: wpKey } = useWallpaper();
   const wpImage = useWallpaperImage(wpKey, wp.image);
 
-  useEffect(() => { void call<{ dev: boolean }>('/auth/config').then((r) => { if (r.ok) setDev(r.data.dev); }); }, []);
+  useEffect(() => { void call<{ dev: boolean; telegram?: boolean }>('/auth/config').then((r) => { if (r.ok) { setDev(r.data.dev); setTelegram(!!r.data.telegram); } }); }, []);
   // адрес открытого чата (#chat=…) остаётся от прошлого сеанса — после входа под другим аккаунтом приложение
   // открыло бы по нему чужой номер («Чат №497»). Экран входа его стирает; остальной хэш (токен QR и т. п.) не трогаем
   useEffect(() => {
@@ -66,6 +69,7 @@ export function AuthFlow() {
 
   const flow: Flow = {
     dev,
+    telegram,
     go(next, opts) {
       clearTimeout(timer.current);
       if (opts?.instant) { setCard(next); return; }
@@ -98,6 +102,7 @@ export function AuthFlow() {
         >
           {card.name === 'phone' ? <PhoneCard initial={card.phone} />
             : card.name === 'qr' ? <QrCard />
+            : card.name === 'telegram' ? <TelegramCard />
             : card.name === 'code' ? <CodeCard card={card} />
             : card.name === 'password' ? <PasswordCard card={card} />
             : card.name === 'recover' ? <RecoverCard card={card} />

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, errorText, type Step } from './api';
 import { CardHead, ErrorLine, useFlow } from './AuthFlow';
 import { PasskeyButton } from './PasskeyButton';
+import { TelegramLink } from './TelegramCard';
 
 const POLL_MS = 2000;
 
@@ -56,6 +57,7 @@ export function QrCard() {
       <ErrorLine text={error} />
       <div class="auth-links">
         <button type="button" class="auth-link" onClick={() => flow.go({ name: 'phone' })}>Вход по номеру телефона ›</button>
+        <TelegramLink />
         <PasskeyButton />
         {flow.dev ? <button type="button" class="auth-link auth-link-dev" onClick={() => flow.go({ name: 'dev' })}>Dev-вход по имени</button> : null}
       </div>

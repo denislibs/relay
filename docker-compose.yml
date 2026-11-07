@@ -113,6 +113,10 @@ services:
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_OWNER_CHAT_ID: "${TELEGRAM_OWNER_CHAT_ID:-}"
       TELEGRAM_API_URL: "${TELEGRAM_API_URL:-}"     # пусто — api.telegram.org; для проверки — свой mock
+      TELEGRAM_LOGIN: "${TELEGRAM_LOGIN:-0}"        # «Войти через Telegram»: бот подтверждает номер (docs/code-delivery.md)
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-}"
+      TELEGRAM_WEBHOOK_URL: "${TELEGRAM_WEBHOOK_URL:-}"   # пусто — воркер опрашивает getUpdates
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
       DEV_MIGRATE: "1"                             # новые migrations/*.sql применяются сами (migrate.watchMigrations)
       S3_ENDPOINT: http://s3:8333
       S3_BUCKET: relay-files
@@ -196,6 +200,10 @@ services:
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
       TELEGRAM_OWNER_CHAT_ID: "${TELEGRAM_OWNER_CHAT_ID:-}"
       TELEGRAM_API_URL: "${TELEGRAM_API_URL:-}"     # пусто — api.telegram.org; для проверки — свой mock
+      TELEGRAM_LOGIN: "${TELEGRAM_LOGIN:-0}"        # «Войти через Telegram»: бот подтверждает номер (docs/code-delivery.md)
+      TELEGRAM_BOT_USERNAME: "${TELEGRAM_BOT_USERNAME:-}"
+      TELEGRAM_WEBHOOK_URL: "${TELEGRAM_WEBHOOK_URL:-}"   # пусто — воркер опрашивает getUpdates
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET:-}"
       VALKEY_URL: redis://valkey:6379
       MEILI_URL: http://search:7700
       MEILI_MASTER_KEY: relay-dev-master-key-change-me

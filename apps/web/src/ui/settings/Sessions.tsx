@@ -41,7 +41,7 @@ const NEW_LOGIN = <span class="app-session-new">Новый вход — не п�
 const LOCKED_HINT = 'Доступно через сутки после входа или после подтверждения на другом устройстве';
 const METHOD: Record<string, string> = {
   code: 'Код из Relay', password: 'Код и облачный пароль', recovery: 'Восстановление через почту', signup: 'Регистрация',
-  passkey: 'Паскей', qr: 'QR-код с другого устройства', dev: 'Вход для разработки',
+  passkey: 'Паскей', qr: 'QR-код с другого устройства', telegram: 'Номер, подтверждённый в Telegram', dev: 'Вход для разработки',
 };
 /** Подпись строки: место (или IP, если места нет) — как в Telegram «Москва, Россия». */
 const where = (s: SessionInfo) => s.place ?? s.ip ?? '';

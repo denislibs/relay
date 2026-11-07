@@ -1,8 +1,8 @@
 // Канал доставки одноразовых кодов — только настройка из окружения, без базы: её читает и проверка старта (tls.ts).
 export type CodeChannel = 'dev' | 'log' | 'telegram' | 'none';
 export type CodeKind = 'login' | 'signup' | 'recovery';
-/** to — телефон или логин (вход, регистрация) либо почта (восстановление); expiresAt — ISO. */
-export interface CodeItem { to: string; kind: CodeKind; code: string; expiresAt?: string }
+/** to — телефон или логин (вход, регистрация) либо почта (восстановление); phone — номер аккаунта, если известен; expiresAt — ISO. */
+export interface CodeItem { to: string; kind: CodeKind; code: string; expiresAt?: string; phone?: string }
 
 export type Env = Record<string, string | undefined>;
 const CHANNELS = ['dev', 'log', 'telegram'];
@@ -33,6 +33,22 @@ export function codeDeliveryProblems(env: Env): string[] {
     if (!env.TELEGRAM_BOT_TOKEN) out.push('CODE_DELIVERY=telegram: set TELEGRAM_BOT_TOKEN');
     if (!/^-?\d+$/.test(env.TELEGRAM_OWNER_CHAT_ID ?? '')) out.push('CODE_DELIVERY=telegram: set TELEGRAM_OWNER_CHAT_ID (numeric chat id)');
     if (env.TELEGRAM_API_URL && !env.TELEGRAM_API_URL.startsWith('https://')) out.push('TELEGRAM_API_URL: https://…');
+  }
+  return out;
+}
+
+/**
+ * «Войти через Telegram» (telegramLogin.ts): TELEGRAM_LOGIN=1, токен и имя бота; webhook — https и секрет заголовка
+ * (без TELEGRAM_WEBHOOK_URL воркер опрашивает getUpdates). Для отказа старта в production (tls.ts).
+ */
+export function telegramLoginProblems(env: Env): string[] {
+  if (env.TELEGRAM_LOGIN !== '1') return [];
+  const out: string[] = [];
+  if (!env.TELEGRAM_BOT_TOKEN) out.push('TELEGRAM_LOGIN=1: set TELEGRAM_BOT_TOKEN');
+  if (!/^[A-Za-z0-9_]{5,32}$/.test(env.TELEGRAM_BOT_USERNAME ?? '')) out.push('TELEGRAM_LOGIN=1: set TELEGRAM_BOT_USERNAME (without @)');
+  if (env.TELEGRAM_WEBHOOK_URL) {
+    if (!env.TELEGRAM_WEBHOOK_URL.startsWith('https://')) out.push('TELEGRAM_WEBHOOK_URL: https://…');
+    if (!/^[A-Za-z0-9_-]{16,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET ?? '')) out.push('TELEGRAM_WEBHOOK_URL: set TELEGRAM_WEBHOOK_SECRET (16–256 of A-Z a-z 0-9 _ -)');
   }
   return out;
 }
