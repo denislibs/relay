@@ -78,6 +78,7 @@ export interface GlobalState {
   infoOpen: boolean;   // правая панель «Информация»
   call: CallView | null;   // звонок: входящий, исходящий или разговор (calls/callController.ts)
   callMin: boolean;        // звонок свёрнут в плашку над шапкой чата (ui/call/CallSlot.tsx)
+  callsUnseen: number;     // новые пропущенные звонки — бейдж «Звонки» в меню (calls/callsList.ts)
   groupCall: GroupCallView | null;   // групповой звонок, в котором я сейчас (calls/groupCall.ts)
   groupCallMin: boolean;             // свёрнут в плашку над шапкой
   listLeaving: boolean;   // телефон: чат закрыли — экран уже едет к списку, лента снимется после перехода (data.ts)
@@ -179,6 +180,7 @@ let state: GlobalState = {
   infoOpen: false,
   call: null,
   callMin: false,
+  callsUnseen: 0,
   groupCall: null,
   groupCallMin: false,
   listLeaving: false,

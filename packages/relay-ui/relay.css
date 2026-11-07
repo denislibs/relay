@@ -942,6 +942,9 @@ button.rl-quote:active { background: var(--quote-bg-active, var(--pressed)); }
 .rl-menu-item .rl-icon { color: var(--ink); opacity: .9; }   /* как в Telegram: иконки одним цветом с текстом */
 .rl-menu-item span { flex: 1; white-space: nowrap; }
 .rl-menu-item kbd { font: 400 12px/1 var(--font-sans); color: var(--ink-muted); }
+.rl-menu-item .rl-menu-badge { flex: none; margin-left: auto; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--danger); color: #fff; font: 600 12px/20px var(--font-sans); text-align: center; }
+.rl-sidehead-menu { position: relative; }
+.rl-sidehead-dot { position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 2px var(--bg); }
 .rl-menu-danger, .rl-menu-danger .rl-icon { color: var(--danger); }
 .rl-menu-sep { height: 1px; margin: 4px 10px; border: 0; background: var(--line); }
 .rl-presence[data-state="closing"] .rl-menu, .rl-presence[data-state="closing"] .rl-rpick, .rl-presence[data-state="closing"] .rl-mentions { animation: rl-pop-out var(--dur-fast) var(--ease-in) forwards; }

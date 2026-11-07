@@ -5,6 +5,7 @@ import { getPrefs } from '../prefs';
 import { CallCryptoError, commitOf, deriveSession, ephemeral, type Ephemeral, type Session } from './callCrypto';
 import { failureOf, getCamera, getMic, stopStream, VIDEO_BITRATE } from './media';
 import { soundSink, sounds, warmCallSounds } from './sounds';
+import { loadUnseenCalls, noteMissedCall } from './callsList';
 import { closeCallNotification, parseCallHash, showCallNotification, type CallIntent } from './callNotify';
 
 /**
@@ -346,7 +347,10 @@ async function onEvent(f: CallEvent): Promise<void> {
       return;
     }
     case 'callEnded': {
-      if (incoming?.callId === f.callId) dismissIncoming();
+      if (incoming?.callId === f.callId) {
+        if (f.reason === 'missed' || f.reason === 'cancelled') noteMissedCall();   // бейдж «Звонки» в меню
+        dismissIncoming();
+      }
       const a = cur;
       if (!a || a.view.callId !== f.callId || a.ended) return;
       finish(a, f.reason, true, f.duration);
@@ -601,6 +605,7 @@ function armConnectTimeout(a: Active): void {
 
 /** Сверка с сервером: новый сокет или вкладка открыта посреди звонка. */
 async function resync(): Promise<void> {
+  void loadUnseenCalls();
   let call: CallInfo | null;
   try { call = ((await send({ op: 'callGet' })) as { call: CallInfo | null }).call; } catch { return; }
   const a = cur;

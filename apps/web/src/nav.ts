@@ -33,6 +33,7 @@ export const PAGES = [
   'archive',   // архивные чаты (строка «Архив» над «Все»)
   'contacts',
   'contacts/:userId/edit',
+  'calls',   // список звонков (меню «Звонки»)
   'newGroup',        // новая группа: выбор участников
   'newGroup/name',   // и название
   'newChannel',         // новый канал: название, описание, фото

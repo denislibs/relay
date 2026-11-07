@@ -5,6 +5,7 @@ import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
 import { declineFromPush } from './domain/calls';
+import { listCalls, markCallsSeen, unseenMissed } from './domain/callsList';
 import { clientIp, devAllowed } from './device';
 import type { Server } from 'bun';
 import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
@@ -404,6 +405,14 @@ export function createServer(opts: { port: number }): Server {
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
+        // список «Звонки»: страницами по (время, id), ?missed=1 — только пропущенные; бейдж — /calls/unseen, открыл список — /calls/seen
+        if (req.method === 'GET' && url.pathname === '/calls') {
+          const m = /^(\d{4}-[0-9T:.\-+Z]+)_(\d+)$/.exec(url.searchParams.get('before') ?? '');
+          if (url.searchParams.has('before') && (!m || Number.isNaN(Date.parse(m[1])))) return fail('bad_frame');
+          return Response.json(await listCalls(userId, { before: m ? { at: m[1], id: Number(m[2]) } : undefined, missed: url.searchParams.get('missed') === '1' }));
+        }
+        if (req.method === 'GET' && url.pathname === '/calls/unseen') return Response.json({ count: await unseenMissed(userId) });
+        if (req.method === 'POST' && url.pathname === '/calls/seen') return Response.json(await markCallsSeen(userId));
         // «Отклонить» в уведомлении о звонке (service worker): вкладок нет — WebSocket открыть негде
         const callDecline = /^\/calls\/([0-9a-f-]{36})\/decline$/.exec(url.pathname);
         if (callDecline && req.method === 'POST') return Response.json(await declineFromPush(publish, userId, callDecline[1]));

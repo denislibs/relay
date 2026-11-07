@@ -64,7 +64,8 @@ function Menu(props) {
         it.leading ? h('span', { class: 'rl-menu-lead', 'aria-hidden': 'true' }, it.leading) : it.icon ? h(Icon, { name: it.icon, size: 20 }) : null, h('span', null, it.label),
         toggle ? h('i', { class: cx('rl-menu-switch', it.checked && 'rl-menu-switch-on'), 'aria-hidden': 'true' }) : null,
         it.submenu ? h(Icon, { name: 'chevronRight', size: 18 }) : null,
-        it.hint ? h('kbd', null, it.hint) : null);
+        it.hint ? h('kbd', null, it.hint) : null,
+        it.badge ? h('span', { class: 'rl-menu-badge', 'aria-label': it.badgeLabel }, it.badge) : null);
     }),
     // подменю — порталом в body с координатами пункта: панель вокруг меню его не обрежет
     opened ? createPortal(h(SubmenuBox, { at: open, onEnter: hold, onLeave: function () { closeSub(); if (props.onLeave) props.onLeave(); } },
@@ -1150,7 +1151,9 @@ function SidebarHeader(props) {
   return h('div', { class: 'rl-sidehead' },
     // одна кнопка: «≡» складывается в «←» (верхняя и нижняя черты поворачиваются и укорачиваются), как в Telegram
     h('button', { type: 'button', class: cx('rl-iconbtn rl-sidehead-menu', props.back && 'rl-sidehead-back'), 'aria-label': props.back ? 'Назад' : 'Меню', onPointerDown: ripple, onClick: props.back ? props.onBack : props.onMenu },
-      h('span', { class: cx('rl-burger', props.back && 'is-back'), 'aria-hidden': 'true' }, h('i'), h('i'), h('i'))),
+      h('span', { class: cx('rl-burger', props.back && 'is-back'), 'aria-hidden': 'true' }, h('i'), h('i'), h('i')),
+      // точка на «≡»: в меню есть новое (пропущенные звонки) — как в Telegram; на «←» не нужна
+      props.menuDot && !props.back ? h('span', { class: 'rl-sidehead-dot', 'aria-hidden': 'true' }) : null),
     h(SearchInput, { id: props.searchId || 'rl-side-search', placeholder: props.placeholder || 'Поиск', status: props.status, busy: props.searchBusy, value: props.value, onInput: props.onSearch, onFocus: props.onSearchFocus, onBlur: props.onSearchBlur, onKeyDown: props.onSearchKey, class: 'rl-sidehead-search' }),
     props.trailing !== undefined ? props.trailing : props.me ? h('button', { type: 'button', class: 'rl-sidehead-me', 'aria-label': 'Профиль', onClick: props.onMe }, h(Avatar, { name: props.me, tone: props.meTone, size: 36 })) : null);
 }
