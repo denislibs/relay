@@ -332,13 +332,15 @@ function nameTone(name) {
 }
 /* ---------- Знак Relay и значок «официальный» ---------- */
 // Свой рисунок: облачко сообщения с двумя встречными стрелками — «передача» (relay). Белым по фирменному градиенту.
+// рамка знака — x 6…18, y 4…18: центр на 1 выше середины сетки 24 — LOGO_DY опускает его в центр (круг, аватар)
+var LOGO_DY = 1;
 var LOGO_PATHS = ['M6 7.5A3.5 3.5 0 0 1 9.5 4h5A3.5 3.5 0 0 1 18 7.5v4a3.5 3.5 0 0 1-3.5 3.5H11l-3.6 3v-3.2A3.5 3.5 0 0 1 6 11.5z', 'M9.6 8.4h4.6l-1.4-1.3', 'M14.4 11h-4.6l1.4 1.3'];
 function RelayLogo(props) {
   var size = props.size || 24;
   return h('svg', { class: 'rl-logo-mark', width: size, height: size, viewBox: '0 0 24 24', fill: 'none', 'aria-hidden': 'true' },
-    LOGO_PATHS.map(function (d, i) {
+    h('g', { transform: 'translate(0 ' + LOGO_DY + ')' }, LOGO_PATHS.map(function (d, i) {
       return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : 'var(--logo-ink)', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
-    }));
+    })));
 }
 /** Значок Relay целиком: знак на круге фирменного градиента (как у аватара официального чата и иконки уведомлений).
  *  size — px; x/y/width/height — чтобы вложить в другой SVG (центр QR-кода). */
@@ -350,7 +352,7 @@ function RelayBadge(props) {
     h('defs', null, h('linearGradient', { id: id, x1: 0, y1: 0, x2: 1, y2: 1 },
       h('stop', { offset: 0, 'stop-color': '#2fd38a' }), h('stop', { offset: 0.55, 'stop-color': '#0f9d7a' }), h('stop', { offset: 1, 'stop-color': '#0c7f86' }))),
     h('circle', { cx: 12, cy: 12, r: 12, fill: 'url(#' + id + ')' }),
-    h('g', { transform: 'translate(4.56 4.56) scale(.62)' }, LOGO_PATHS.map(function (d, i) {
+    h('g', { transform: 'translate(4.56 ' + (4.56 + LOGO_DY * 0.62) + ') scale(.62)' }, LOGO_PATHS.map(function (d, i) {
       return h('path', { key: i, d: d, fill: i === 0 ? '#fff' : 'none', stroke: i === 0 ? 'none' : '#0b8a5f', 'stroke-width': 1.6, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
     })));
 }
