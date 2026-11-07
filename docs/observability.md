@@ -156,6 +156,7 @@ nginx или свой; тот же id — в заголовке ответа), `
 | `RelayJobsRetrying` (warning) | повторы задач kind > 0,2/с, 10 мин | обработчик падает | логи воркера `grep 'job failed'`; обычно недоступен S3, Meilisearch или Telegram |
 | `RelayJobsStuck` (warning) | старейшая готовая задача ждёт > 10 мин | воркер не успевает или стоит | `deploy/compose.sh ps worker`; забит ли пул видео/фото |
 | `RelayTelegramDeliveryFailed` (critical) | код входа не ушёл (`failed`) или упёрся в дневной предел (`capped`) | люди не могут войти | логи воркера `grep 'code delivery'`; `capped` — поднять `TELEGRAM_DAILY_CAP`; `failed` — токен, бот заблокирован, сеть |
+| `RelayDeployRolledBack` (critical) | шлёт `deploy.sh`, когда наблюдение после выката откатило сборку | новая сборка хуже прежней: причина — в тексте | лог шага deploy в Actions; починить и выкатить заново ([deploy.md](deploy.md), «Наблюдение после выката») |
 | `RelayHostMemoryLow` (warning) | свободно < 10 % памяти, 10 мин | скоро OOM | панель «Память контейнеров»; первыми растут worker (ffmpeg) и postgres |
 
 Проверить доставку тревог без поломки: `deploy/compose.sh exec alertmanager amtool alert add test severity=warning --annotation=summary=проверка --alertmanager.url=http://127.0.0.1:9093`.

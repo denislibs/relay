@@ -94,7 +94,7 @@ jobs:
     # сборка пропущена (выкат готового тега) — тоже выкатываем; упала — нет
     if: ${{ !cancelled() && (needs.images.result == 'success' || (needs.images.result == 'skipped' && inputs.tag != '')) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35   # выкат ~5 мин + наблюдение 10 (deploy/bake.ts) + запас
     environment:
       name: production
       url: https://denigram.site

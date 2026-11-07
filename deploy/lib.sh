@@ -46,6 +46,13 @@ key_token_server key_token_worker key_service_tokens key_service_audit_key vault
 livekit_api_key livekit_api_secret livekit_keys telegram_bot_token telegram_webhook_secret grafana_admin_password alert_bot_token"
 SECRET_NAMES=$(printf '%s' "$SECRET_NAMES" | tr '\n' ' ')   # одной строкой через пробел
 
+# имена секретов из deploy/lib.sh коммита <sha> (одной строкой): выкат PR, который добавил секрет, — его файл уже
+# записан владельцем, а проверку делает ещё прежний checkout, не знающий этого имени
+secret_names_at() {
+  git -C "$RELAY_DIR" show "$1:deploy/lib.sh" 2>/dev/null | sed -n '/^SECRET_NAMES="/,/"$/p' | tr '\n"' '  ' |
+    sed -e 's/^ *SECRET_NAMES= *//' -e 's/  */ /g' -e 's/ *$//'
+}
+
 is_secret_name() { case " $SECRET_NAMES " in *" $1 "*) [ -n "$1" ] ;; *) return 1 ;; esac; }
 
 # сколько в secrets/run файлов с неизвестными именами (сами имена не выводятся никогда)

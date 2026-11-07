@@ -80,3 +80,19 @@ test('one list of secret names: lib.sh SECRET_NAMES = make-secrets.sh = files in
   expect(made).toEqual(lib);
   expect([...mounted, 'bao_backup_token'].sort()).toEqual(lib);
 });
+
+// PR добавил секрет, владелец уже записал файл, а проверку посторонних файлов делает прежний checkout:
+// deploy.sh добавляет к списку имена из deploy/lib.sh выкатываемого коммита (lib.sh: secret_names_at)
+test('secret_names_at: names from deploy/lib.sh of the target commit, joined on one line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'relay-names-'));
+  mkdirSync(join(dir, 'deploy'));
+  const git = (...a: string[]) => Bun.spawnSync(['git', '-C', dir, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a]);
+  git('init', '-q');
+  writeFileSync(join(dir, 'deploy', 'lib.sh'), 'SECRET_NAMES="pg_password vault_token\ntelegram_bot_token new_secret"\nSECRET_NAMES=$(printf x)\n');
+  git('add', '.'); git('commit', '-qm', 'x');
+  const sha = new TextDecoder().decode(git('rev-parse', 'HEAD').stdout).trim();
+  const r = Bun.spawnSync(['sh', '-c', `. "${process.cwd()}/deploy/lib.sh" && secret_names_at "$1"`, 'sh', sha], { env: { ...process.env, RELAY_DIR: dir } });
+  expect(new TextDecoder().decode(r.stdout)).toBe('pg_password vault_token telegram_bot_token new_secret');
+  const none = Bun.spawnSync(['sh', '-c', `. "${process.cwd()}/deploy/lib.sh" && secret_names_at deadbeef`], { env: { ...process.env, RELAY_DIR: dir } });
+  expect(new TextDecoder().decode(none.stdout)).toBe('');
+});

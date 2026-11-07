@@ -330,6 +330,33 @@ Actions → deploy → Run workflow (ветка master, tag пустой) — CI
 
 ## Ежедневно: выкат
 
+### Наблюдение после выката
+
+После smoke `deploy.sh` ещё `BAKE_MINUTES` (10) минут наблюдает новую сборку: `deploy/bake.ts` раз в 30 с смотрит
+`/ready` и метрики VictoriaMetrics новой сборки против прежней за час до выката, а `deploy.sh` — перезапуски
+контейнеров server и worker. Плохо — откат на прежнюю сборку, шаг CI красный, владельцу — тревога
+`RelayDeployRolledBack` с причиной. Откат (`rollback.sh`, Run workflow с tag) не наблюдается.
+
+| Сигнал | Провал |
+|---|---|
+| перезапуск server/worker (контейнер или процесс новой сборки) | сразу |
+| `/ready` → `ok:false`; `up` server/worker = 0 | 2 замера подряд |
+| доля 5xx | > 2 % и > 3× базы, при ≥ 20 запросах |
+| ошибки кадров WebSocket `internal`; ошибки клиентов новой сборки | > 3× базы + 5 |
+| p95 ответа | > 1 с и > 2× базы, при ≥ 50 запросах |
+| VictoriaMetrics не видит новую сборку | к половине наблюдения |
+
+При малом трафике пороги по запросам не набираются и молчат. Без наблюдаемости (`RELAY_OBSERVABILITY=0`) или при
+недоступной VictoriaMetrics — только `/ready` и перезапуски: поломка мониторинга выкат не откатывает.
+Срочный хотфикс без ожидания — руками на сервере: `BAKE_MINUTES=0 sudo -u deploy /opt/relay/deploy/deploy.sh <sha>`.
+Проверить запросы судьи к живой VictoriaMetrics (пороги нулевые — любой запрос даёт «откатить», ничего не откатывает):
+
+```bash
+cd / && sudo -u deploy /opt/relay/deploy/compose.sh run --rm --no-deps -T \
+  -v /opt/relay/deploy/bake.ts:/bake.ts:ro --entrypoint bun server /bake.ts \
+  --build "$(cat /opt/relay/deploy/state/current)" --minutes 1 --interval 10 --strict
+```
+
 Merge PR в master — и всё: `deploy.yml` прогоняет CI ещё раз на коммите master, собирает и публикует образы с тегом
 sha (и `latest`), заходит на сервер (`deploy <sha>` → `deploy.sh <sha>`) и затем открывает сайт в настоящем
 браузере (`tools/ci/browser-smoke.mjs`: оболочка приложения отрисовалась, Service Worker активен, в консоли нет
@@ -478,8 +505,8 @@ deploy/compose.sh up -d s3
 
 ## Что ещё не сделано
 
-- **canary** — позже, поверх этого CD, когда будет наблюдаемость: сейчас `up -d` пересоздаёт server/worker/proxy
-  за секунды, клиенты переподключаются;
+- **canary** (часть пользователей на новой сборке) — когда трафика хватит для сравнения; сейчас — наблюдение после
+  выката с автооткатом (ниже, «Наблюдение после выката»), его судья (`deploy/bake.ts`) подойдёт и канарейке;
 - TURN по TLS (`5349`, `turn.denigram.site`) — порт в firewall открыт, coturn пока без TLS-листенера;
 - один сервер: OpenBao, Postgres и S3 на той же машине — бэкапы вне сервера обязательны;
 - проверка типов `apps/server` и `packages/sync-engine` в CI: у пакетов нет tsconfig, а строгая проверка сейчас
