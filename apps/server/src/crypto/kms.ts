@@ -16,6 +16,8 @@ export interface Kms {
   stale?(wrapped: Uint8Array): Promise<boolean>;
   /** Перезавернуть последней версией, не раскрывая ключ чата (Vault Transit rewrap). */
   rewrap?(wrapped: Uint8Array): Promise<Uint8Array>;
+  /** Готов работать (/ready): Vault не запечатан, сервис ключей отвечает. Нет метода — всегда готов. */
+  ready?(): Promise<boolean>;
 }
 
 const WRAP_AAD = 'relay|chat-key';
@@ -42,6 +44,11 @@ export class VaultKms implements Kms {
   constructor(private addr = process.env.VAULT_ADDR!, private token = process.env.VAULT_TOKEN!, private keyName = process.env.VAULT_TRANSIT_KEY ?? 'relay-chat-keys') {
     if (!addr || !token) throw new Error('VAULT_ADDR and VAULT_TOKEN are required for KMS_PROVIDER=vault');
     this.id = 'vault:transit/' + keyName;
+  }
+  /** sys/health: 200 — активен, 429/473 — резервный узел (тоже работает); 503 — запечатан, 501 — не инициализирован. */
+  async ready() {
+    const res = await fetch(`${this.addr}/v1/sys/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+    return !!res && (res.status === 200 || res.status === 429 || res.status === 473);
   }
   private async call(op: 'encrypt' | 'decrypt', body: Record<string, string>): Promise<Record<string, string>> {
     const res = await fetch(`${this.addr}/v1/transit/${op}/${this.keyName}`, {
@@ -95,6 +102,11 @@ export class RemoteKms implements Kms {
     return res.json() as Promise<T>;
   }
   async init() { this.id = (await this.call<{ kekId: string }>('/info')).kekId; }
+  /** /ready сервиса ключей — без токена: отвечает только «готов или нет» (за ним — состояние Vault). */
+  async ready() {
+    const res = await fetch(this.url + '/ready', { signal: AbortSignal.timeout(3000) }).catch(() => null);
+    return !!res?.ok;
+  }
   async wrap(dek: Uint8Array) {
     const r = await this.call<{ wrapped: string; kekId: string }>('/wrap', { dek: Buffer.from(dek).toString('base64') });
     this.id = r.kekId;

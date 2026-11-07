@@ -1,0 +1,2171 @@
+{
+ "uid": "relay-overview",
+ "title": "Relay",
+ "tags": [
+  "relay"
+ ],
+ "timezone": "browser",
+ "schemaVersion": 39,
+ "version": 1,
+ "editable": false,
+ "time": {
+  "from": "now-6h",
+  "to": "now"
+ },
+ "refresh": "30s",
+ "graphTooltip": 1,
+ "templating": {
+  "list": [
+   {
+    "name": "build",
+    "label": "Сборка",
+    "type": "query",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "vm"
+    },
+    "query": {
+     "query": "label_values(relay_build_info, build)",
+     "refId": "build"
+    },
+    "definition": "label_values(relay_build_info, build)",
+    "includeAll": true,
+    "multi": true,
+    "allValue": ".*",
+    "current": {
+     "selected": true,
+     "text": [
+      "All"
+     ],
+     "value": [
+      "$__all"
+     ]
+    },
+    "refresh": 2,
+    "sort": 1
+   }
+  ]
+ },
+ "annotations": {
+  "list": [
+   {
+    "builtIn": 1,
+    "datasource": {
+     "type": "grafana",
+     "uid": "-- Grafana --"
+    },
+    "enable": true,
+    "hide": true,
+    "iconColor": "rgba(0, 211, 255, 1)",
+    "name": "Annotations & Alerts",
+    "type": "dashboard"
+   },
+   {
+    "name": "Выкаты",
+    "datasource": {
+     "type": "prometheus",
+     "uid": "vm"
+    },
+    "enable": true,
+    "iconColor": "purple",
+    "expr": "changes(relay_build_info{job=\"server\"}[2m]) > 0 or (relay_build_info{job=\"server\"} unless relay_build_info{job=\"server\"} offset 2m)",
+    "step": "60s",
+    "titleFormat": "сборка {{build}}",
+    "tagKeys": "build"
+   }
+  ]
+ },
+ "panels": [
+  {
+   "type": "row",
+   "title": "Обзор",
+   "id": 1,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 0
+   },
+   "panels": []
+  },
+  {
+   "type": "stat",
+   "title": "Запросов/с",
+   "description": "",
+   "id": 2,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 0,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(rate(relay_http_requests_total{build=~\"$build\"}[5m]))",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "5xx",
+   "description": "Доля 5xx; тревога RelayHttp5xx — больше 2 % 5 минут",
+   "id": 3,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 4,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.01
+       },
+       {
+        "color": "red",
+        "value": 0.02
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(rate(relay_http_requests_total{build=~\"$build\",status=~\"5..\"}[5m])) / sum(rate(relay_http_requests_total{build=~\"$build\"}[5m]))",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "p95 API",
+   "description": "",
+   "id": 4,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 8,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.5
+       },
+       {
+        "color": "red",
+        "value": 1
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "histogram_quantile(0.95, sum by (le) (rate(relay_http_request_duration_seconds_bucket{build=~\"$build\",route!~\"ws|static\"}[5m])))",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "WebSocket",
+   "description": "Открытые допущенные сокеты во всех процессах server",
+   "id": 5,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 12,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(relay_ws_connections{build=~\"$build\"})",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "Задачи: в очереди",
+   "description": "",
+   "id": 6,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 16,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 100
+       },
+       {
+        "color": "red",
+        "value": 1000
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(relay_jobs_ready) or vector(0)",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "title": "KMS / Postgres / Valkey",
+   "description": "1 — все зависимости готовы у всех процессов; 0 — смотрите /ready и тревоги",
+   "id": 7,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 4,
+    "w": 4,
+    "x": 20,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       }
+      ]
+     },
+     "noValue": "0"
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "colorMode": "value",
+    "graphMode": "area",
+    "textMode": "auto"
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "min(relay_dependency_up)",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "API по сборкам",
+   "id": 8,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 5
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Запросы по сборке",
+   "description": "",
+   "id": 9,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 6
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (build) (rate(relay_http_requests_total{build=~\"$build\"}[5m]))",
+     "legendFormat": "{{build}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Доля 5xx по сборке",
+   "description": "Канарейка: новая сборка не должна быть выше старой",
+   "id": 10,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 6
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "(sum by (build) (rate(relay_http_requests_total{build=~\"$build\",status=~\"5..\"}[5m])) or 0 * sum by (build) (rate(relay_http_requests_total{build=~\"$build\"}[5m]))) / sum by (build) (rate(relay_http_requests_total{build=~\"$build\"}[5m]))",
+     "legendFormat": "{{build}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "p95 по сборке",
+   "description": "",
+   "id": 11,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 6
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "histogram_quantile(0.95, sum by (build, le) (rate(relay_http_request_duration_seconds_bucket{build=~\"$build\",route!~\"ws|static\"}[5m])))",
+     "legendFormat": "{{build}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "p95 по маршруту",
+   "description": "",
+   "id": 12,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 14
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "topk(8, histogram_quantile(0.95, sum by (route, le) (rate(relay_http_request_duration_seconds_bucket{build=~\"$build\",route!~\"ws|static\"}[5m]))))",
+     "legendFormat": "{{route}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ответы 4xx/5xx по маршруту",
+   "description": "",
+   "id": 13,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 14
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "reqps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "topk(10, sum by (route, status) (rate(relay_http_requests_total{build=~\"$build\",status=~\"[45]..\"}[5m])))",
+     "legendFormat": "{{route}} {{status}}"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "WebSocket",
+   "id": 14,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 22
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Открытые сокеты",
+   "description": "",
+   "id": 15,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 23
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (build) (relay_ws_connections{build=~\"$build\"})",
+     "legendFormat": "{{build}}"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (instance) (relay_ws_connections{build=~\"$build\"})",
+     "legendFormat": "{{instance}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Кадры по op",
+   "description": "",
+   "id": 16,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 23
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "topk(10, sum by (op) (rate(relay_ws_frames_total{build=~\"$build\"}[5m])))",
+     "legendFormat": "{{op}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ошибки кадров (код, в т. ч. flood)",
+   "description": "",
+   "id": 17,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 23
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (result) (rate(relay_ws_frames_total{build=~\"$build\",result!=\"ok\"}[5m]))",
+     "legendFormat": "{{result}}"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (reason) (rate(relay_ws_closes_total{build=~\"$build\"}[5m]))",
+     "legendFormat": "закрыт: {{reason}}"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Задачи (worker)",
+   "id": 18,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 31
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Готовы к выполнению",
+   "description": "",
+   "id": 19,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (kind) (relay_jobs_ready)",
+     "legendFormat": "{{kind}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Отказы: повтор и окончательные",
+   "description": "dead — задача в jobs_dead (тревога RelayJobsDead)",
+   "id": 20,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (kind, result) (rate(relay_jobs_processed_total{build=~\"$build\",result!=\"ok\"}[5m]))",
+     "legendFormat": "{{kind}} {{result}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ожидание старейшей задачи",
+   "description": "",
+   "id": 21,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 32
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "max by (kind) (relay_jobs_lag_seconds)",
+     "legendFormat": "{{kind}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Выполнено",
+   "description": "",
+   "id": 22,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 40
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "ops",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (kind) (rate(relay_jobs_processed_total{build=~\"$build\",result=\"ok\"}[5m]))",
+     "legendFormat": "{{kind}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "p95 времени задачи",
+   "description": "",
+   "id": 23,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 40
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "s",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "histogram_quantile(0.95, sum by (kind, le) (rate(relay_job_duration_seconds_bucket{build=~\"$build\"}[15m])))",
+     "legendFormat": "{{kind}}"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Звонки",
+   "id": 24,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 48
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "1:1 — попытки по исходу",
+   "description": "",
+   "id": 25,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 49
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (result) (increase(relay_call_requests_total{build=~\"$build\"}[1h]))",
+     "legendFormat": "{{result}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "1:1 — завершения по причине",
+   "description": "failed — не соединились или оборвалось; детали — ошибки клиентов, источник call",
+   "id": 26,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 49
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (reason) (increase(relay_call_ends_total{build=~\"$build\"}[1h]))",
+     "legendFormat": "{{reason}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Доля звонков через TURN",
+   "description": "По отчётам клиентов (POST /client-stats) о выбранной паре кандидатов",
+   "id": 27,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 49
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "max": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(increase(relay_call_paths_total{path=\"relay\"}[6h])) / sum(increase(relay_call_paths_total[6h]))",
+     "legendFormat": "через TURN"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Групповые: входы по исходу",
+   "description": "",
+   "id": 28,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 57
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (via, result) (increase(relay_group_call_joins_total{build=~\"$build\"}[1h]))",
+     "legendFormat": "{{via}} {{result}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "LiveKit: ошибки серверного API",
+   "description": "",
+   "id": 29,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 57
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (method, reason) (increase(relay_livekit_errors_total{build=~\"$build\"}[1h]))",
+     "legendFormat": "{{method}} {{reason}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "LiveKit и TURN: нагрузка",
+   "description": "Ряды самих LiveKit (:6789) и coturn (:9641)",
+   "id": 30,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 57
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(livekit_participant_total)",
+     "legendFormat": "участники LiveKit"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(livekit_room_total)",
+     "legendFormat": "комнаты LiveKit"
+    },
+    {
+     "refId": "C",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(turn_total_allocations)",
+     "legendFormat": "сессии TURN"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Трафик через TURN",
+   "description": "Медиа, которое шло через наш TURN (звонки 1:1 без прямого пути)",
+   "id": 31,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 65
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bps",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(rate(turn_total_traffic_peer_sentb[5m])) * 8",
+     "legendFormat": "к собеседникам"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum(rate(turn_total_traffic_peer_rcvb[5m])) * 8",
+     "legendFormat": "от собеседников"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Коды входа и ошибки клиентов",
+   "id": 32,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 73
+   },
+   "panels": []
+  },
+  {
+   "type": "timeseries",
+   "title": "Доставка кодов (Telegram)",
+   "description": "failed/capped — тревога RelayTelegramDeliveryFailed",
+   "id": 33,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 0,
+    "y": 74
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (result) (increase(relay_code_deliveries_total[1h]))",
+     "legendFormat": "{{result}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ошибки клиентов по источнику",
+   "description": "",
+   "id": 34,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 8,
+    "y": 74
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (source) (increase(relay_client_errors_total[1h]))",
+     "legendFormat": "{{source}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Ошибки клиентов по сборке клиента",
+   "description": "",
+   "id": 35,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 8,
+    "x": 16,
+    "y": 74
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (client_build) (increase(relay_client_errors_total[1h]))",
+     "legendFormat": "{{client_build}}"
+    },
+    {
+     "refId": "B",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (reason) (increase(relay_client_reports_dropped_total[1h]))",
+     "legendFormat": "отклонено: {{reason}}"
+    }
+   ]
+  },
+  {
+   "type": "row",
+   "title": "Диски и память",
+   "id": 36,
+   "collapsed": false,
+   "gridPos": {
+    "h": 1,
+    "w": 24,
+    "x": 0,
+    "y": 82
+   },
+   "panels": []
+  },
+  {
+   "type": "gauge",
+   "title": "/srv/relay-s3",
+   "description": "Раздел вложений (SeaweedFS); тревога — больше 80 %",
+   "id": 37,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 5,
+    "w": 4,
+    "x": 0,
+    "y": 83
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "min": 0,
+     "max": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.7
+       },
+       {
+        "color": "red",
+        "value": 0.8
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "showThresholdMarkers": true
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "1 - node_filesystem_avail_bytes{mountpoint=\"/srv/relay-s3\"} / node_filesystem_size_bytes{mountpoint=\"/srv/relay-s3\"}",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "gauge",
+   "title": "Системный диск /",
+   "description": "",
+   "id": 38,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 5,
+    "w": 4,
+    "x": 4,
+    "y": 83
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "min": 0,
+     "max": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.7
+       },
+       {
+        "color": "red",
+        "value": 0.8
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "showThresholdMarkers": true
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!~\"tmpfs|overlay\"}",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "gauge",
+   "title": "Память хоста",
+   "description": "",
+   "id": 39,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 5,
+    "w": 4,
+    "x": 8,
+    "y": 83
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "min": 0,
+     "max": 1,
+     "thresholds": {
+      "mode": "absolute",
+      "steps": [
+       {
+        "color": "green",
+        "value": null
+       },
+       {
+        "color": "orange",
+        "value": 0.7
+       },
+       {
+        "color": "red",
+        "value": 0.8
+       }
+      ]
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "reduceOptions": {
+     "calcs": [
+      "lastNotNull"
+     ],
+     "fields": "",
+     "values": false
+    },
+    "showThresholdMarkers": true
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+     "legendFormat": ""
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Заполнение дисков",
+   "description": "",
+   "id": 40,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 5,
+    "w": 12,
+    "x": 12,
+    "y": 83
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percentunit",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     },
+     "max": 1
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "1 - node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay|squashfs\"}",
+     "legendFormat": "{{mountpoint}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Память контейнеров",
+   "description": "",
+   "id": 41,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 88
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (service) (container_memory_working_set_bytes{service!=\"\"})",
+     "legendFormat": "{{service}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "Память процессов Relay (RSS)",
+   "description": "",
+   "id": 42,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 12,
+    "y": 88
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "bytes",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "none"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (job, build) (relay_process_memory_bytes{build=~\"$build\",kind=\"rss\"})",
+     "legendFormat": "{{job}} {{build}}"
+    }
+   ]
+  },
+  {
+   "type": "timeseries",
+   "title": "CPU контейнеров",
+   "description": "Ядер; на хосте их 4",
+   "id": 43,
+   "datasource": {
+    "type": "prometheus",
+    "uid": "vm"
+   },
+   "gridPos": {
+    "h": 8,
+    "w": 12,
+    "x": 0,
+    "y": 96
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 1,
+      "fillOpacity": 10,
+      "showPoints": "never",
+      "spanNulls": true,
+      "stacking": {
+       "mode": "normal"
+      }
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi",
+     "sort": "desc"
+    }
+   },
+   "targets": [
+    {
+     "refId": "A",
+     "datasource": {
+      "type": "prometheus",
+      "uid": "vm"
+     },
+     "expr": "sum by (service) (rate(container_cpu_usage_seconds_total{service!=\"\"}[5m]))",
+     "legendFormat": "{{service}}"
+    }
+   ]
+  }
+ ]
+}

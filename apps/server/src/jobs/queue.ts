@@ -1,4 +1,6 @@
 import { onCommit, sql, type Tx } from '../db';
+import { jobsProcessed } from '../obs/appMetrics';
+import { log } from '../obs/log';
 
 /**
  * Очередь задач в Postgres (transactional outbox). Задача ставится в транзакции изменения данных;
@@ -85,7 +87,11 @@ export function backoffMs(attempts: number): number {
 /** Ошибка обработчика: повтор позже, а без повтора или после лимита — в jobs_dead (без payload.secret). */
 export async function fail(job: Job, err: unknown, opts: { retry: boolean } = { retry: true }): Promise<void> {
   const message = String(err instanceof Error ? err.message : err).slice(0, 2000);
-  if (opts.retry && job.attempts < job.maxAttempts) {
+  const retry = opts.retry && job.attempts < job.maxAttempts;
+  jobsProcessed.inc({ kind: job.kind, result: retry ? 'retry' : 'dead' });
+  // payload в лог не идёт (там бывают секреты: code.deliver); сообщение ошибки обработчики пишут без них
+  log[retry ? 'warn' : 'error'](retry ? 'job failed, will retry' : 'job failed permanently', { jobId: job.id, kind: job.kind, attempts: job.attempts, maxAttempts: job.maxAttempts, err: message.slice(0, 500) });
+  if (retry) {
     await sql`update jobs set run_at = now() + make_interval(secs => ${backoffMs(job.attempts) / 1000}), locked_until = null, last_error = ${message}
               where id = ${job.id} and attempts = ${job.attempts}`;
     return;
