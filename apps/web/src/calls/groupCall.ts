@@ -7,6 +7,7 @@ import { ephemeral, type Ephemeral } from './callCrypto';
 import { membersEmoji, openSenderKey, sealSenderKey, senderKey } from './groupCrypto';
 import { audioConstraints, failureOf, videoConstraints } from './media';
 import { blurProcessor } from './background';
+import type { NetLevel } from './quality';
 import { sounds } from './sounds';
 
 /**
@@ -19,7 +20,7 @@ import { sounds } from './sounds';
 
 type LK = typeof import('livekit-client');
 
-export interface GroupMemberView extends GroupCallMember { identity: string; me: boolean; speaking: boolean }
+export interface GroupMemberView extends GroupCallMember { identity: string; me: boolean; speaking: boolean; net: NetLevel }
 export interface GroupCallView {
   callId: string;
   chatId: number;
@@ -274,6 +275,11 @@ function wireRoom(a: Active): void {
     const ids = new Set(speakers.map((s) => s.identity));
     view({ members: a.view.members.map((m) => ({ ...m, speaking: ids.has(m.identity) })) });
   });
+  // качество связи каждого (и своё) — от LiveKit: значок на плитке, «Плохое соединение» у себя (calls/quality.ts)
+  a.room.on(E.ConnectionQualityChanged, (q, p) => {
+    const level = lkLevel(String(q));
+    view({ members: a.view.members.map((m) => (m.identity === p.identity ? { ...m, net: level } : m)) });
+  });
   a.room.on(E.Reconnecting, () => view({ phase: 'reconnecting' }));
   a.room.on(E.Reconnected, () => view({ phase: 'active' }));
   a.room.on(E.Disconnected, () => { if (!a.ended) finish(a, 'failed'); });
@@ -298,12 +304,16 @@ async function onEvent(f: CallEvent): Promise<void> {
   }
 }
 
+/** ConnectionQuality LiveKit → наш уровень 0–3 (calls/quality.ts). */
+const lkLevel = (q: string): NetLevel => (q === 'excellent' ? 3 : q === 'good' ? 2 : q === 'poor' ? 1 : q === 'lost' ? 0 : 3);
+
 /** Новый состав: эмодзи, флаги, и если эпоха выросла — новый свой ключ всем. */
 async function onState(a: Active, epoch: number, members: GroupCallMember[]): Promise<void> {
   const speaking = new Set(a.view.members.filter((m) => m.speaking).map((m) => m.identity));
+  const net = new Map(a.view.members.map((m) => [m.identity, m.net]));
   const list: GroupMemberView[] = members.map((m) => {
     const identity = `u${m.userId}-s${m.session}`;
-    return { ...m, identity, me: m.session === a.session, speaking: speaking.has(identity) };
+    return { ...m, identity, me: m.session === a.session, speaking: speaking.has(identity), net: net.get(identity) ?? 3 };
   });
   const mine = list.find((m) => m.me);
   view({ members: list, epoch, mutedByAdmin: !!mine?.mutedByAdmin, emoji: await membersEmoji(a.view.callId, members) });

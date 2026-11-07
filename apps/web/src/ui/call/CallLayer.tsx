@@ -44,7 +44,8 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
   }, [v.rev, v.callId]);
   const incoming = v.phase === 'incoming';
   const ended = v.phase === 'ended';
-  const showRemote = v.peerCam && (v.phase === 'active' || v.phase === 'reconnecting');
+  const showRemote = v.peerCam && !v.inPaused && (v.phase === 'active' || v.phase === 'reconnecting');
+  const live = v.phase === 'active';
   const [emojiHint, setEmojiHint] = useState(false);
   return (
     <div class={'app-call' + (showRemote ? ' app-call-video' : '') + (ended ? ' app-call-ended' : '')} role="dialog" aria-label={incoming ? 'Входящий звонок' : 'Звонок'} data-phase={v.phase}>
@@ -70,7 +71,11 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
         <Avatar name={peer.name} tone={peer.tone} size={showRemote ? 48 : 120} {...peer.photo} />
         <b>{peer.name}</b>
         <span class="app-call-status" aria-live="polite">{callStatus(v, now)}</span>
-        {!v.peerMic && v.phase === 'active' ? <span class="app-call-note"><Icon name="micOff" size={16} /> {peer.name}: микрофон выключен</span> : null}
+        {!v.peerMic && live ? <span class="app-call-note"><Icon name="micOff" size={16} /> {peer.name}: микрофон выключен</span> : null}
+        {live && v.inPaused ? <span class="app-call-note app-call-net"><Icon name="signal" size={16} /> Видео приостановлено из-за слабой связи</span>
+          : live && v.net <= 1 ? <span class="app-call-note app-call-net"><Icon name="signal" size={16} /> Плохое соединение</span>
+          : live && v.peerNet <= 1 ? <span class="app-call-note app-call-net"><Icon name="signal" size={16} /> Слабый сигнал у собеседника</span> : null}
+        {live && v.outPaused ? <span class="app-call-note"><Icon name="videoOff" size={16} /> Ваше видео на паузе: у собеседника слабая связь</span> : null}
       </div>
       <video ref={localVideo} class={'app-call-local' + (v.cam && !incoming ? ' is-on' : '')} autoplay playsInline muted aria-hidden="true" />
       <div class="app-call-controls">

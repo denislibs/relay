@@ -127,6 +127,7 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
           <button type="button" class="app-call-hint-ok" onClick={() => setHint(false)}>Понятно</button>
         </div>
       ) : null}
+      {v.phase === 'active' && (v.members.find((m) => m.me)?.net ?? 3) <= 1 ? <span class="app-call-note app-call-net app-gcall-badnet"><Icon name="signal" size={16} /> Плохое соединение</span> : null}
       <div class={'app-gcall-body' + (list ? ' with-list' : '')}>
         <div class="app-gcall-grid" style={{ '--cols': cols }}>
           {tiles.map((m) => <Tile key={m.identity} m={m} rev={v.rev} pinned={pinned === m.identity} onPin={() => setPinned((p) => (p === m.identity ? null : m.identity))} />)}
@@ -184,7 +185,7 @@ function Tile({ m, rev, pinned, onPin }: { m: GroupMemberView; rev: number; pinn
     <button type="button" class={'app-gtile' + (m.speaking ? ' is-speaking' : '') + (hasVideo ? ' has-video' : '') + (pinned ? ' is-pinned' : '')} onClick={onPin} aria-label={name + (pinned ? ' — открепить' : ' — на весь экран')}>
       <video ref={ref} autoplay playsInline muted class={m.me && !m.screen ? 'is-mirror' : ''} />
       {hasVideo ? null : <Avatar name={real} tone={peerTone(m.userId)} size={88} {...avatarPhoto((u?.photo as ProfilePhoto | null) ?? null)} />}
-      <span class="app-gtile-name">{m.muted ? <Icon name="micOff" size={14} /> : null}{m.hand ? <Icon name="raiseHand" size={14} /> : null}{name}</span>
+      <span class="app-gtile-name">{m.net <= 1 ? <Icon name="signal" size={14} class="app-gtile-net" title="Слабый сигнал" /> : null}{m.muted ? <Icon name="micOff" size={14} /> : null}{m.hand ? <Icon name="raiseHand" size={14} /> : null}{name}</span>
     </button>
   );
 }

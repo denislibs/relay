@@ -6,6 +6,7 @@ import { CallCryptoError, commitOf, deriveSession, ephemeral, type Ephemeral, ty
 import { failureOf, getCamera, getMic, stopStream, VIDEO_BITRATE } from './media';
 import { soundSink, sounds, warmCallSounds } from './sounds';
 import { loadUnseenCalls, noteMissedCall } from './callsList';
+import { levelOf, sampleOf, smoother, videoCap, type NetLevel, type NetSample } from './quality';
 import { closeCallNotification, parseCallHash, showCallNotification, type CallIntent } from './callNotify';
 
 /**
@@ -33,6 +34,9 @@ export interface CallView {
   relay: boolean;              // идёт через TURN (кто-то из двоих не разрешил прямое соединение)
   mic: boolean; cam: boolean;  // мои
   peerMic: boolean; peerCam: boolean;
+  net: NetLevel; peerNet: NetLevel;   // качество связи: моё и собеседника (calls/quality.ts)
+  outPaused: boolean;          // моё видео на паузе: у собеседника очень слабый приём
+  inPaused: boolean;           // видео собеседника на паузе по моей просьбе: у меня очень слабый приём
   reason: CallFailure | null;  // чем кончился (phase ended)
   duration?: number;
   rev: number;                 // потоки поменялись — перерисовать <video>
@@ -65,6 +69,11 @@ interface Active {
   makingOffer: boolean; ignoreOffer: boolean;
   timers: Set<ReturnType<typeof setTimeout>>;
   ping: ReturnType<typeof setInterval> | null;
+  stats: ReturnType<typeof setInterval> | null;   // замер качества связи раз в STATS_MS
+  smooth: (l: NetLevel) => NetLevel;
+  counters: { lost: number; recv: number };
+  bad: number; good: number;                      // замеров подряд: очень плохо / хорошо (пауза входящего видео)
+  fakeNet?: NetSample | null;                     // dev: подменить замер (проверка плохой сети в Playwright)
   releaseLock: (() => void) | null;
   releaseRing: (() => void) | null;
   lastRestart: number;
@@ -83,6 +92,8 @@ const DISCONNECTED_MS = 2_000;   // «disconnected» дольше — перез
 const RESTART_GAP_MS = 5_000;
 const RING_LOCAL_MS = 50_000;    // страховка: сервер завершит «пропущен» через 45 с
 const ENDED_SHOW_MS = 1_800;
+const STATS_MS = 2_000;          // замер качества связи
+const PAUSE_AFTER = 3;           // замеров подряд до паузы входящего видео и обратно
 
 let send: Send = async () => { throw new Error('calls not started'); };
 let me = 0;
@@ -233,7 +244,7 @@ function dismissIncoming(): void {
 }
 const incomingView = (c: CallInfo): CallView => ({
   callId: c.callId, chatId: c.chatId, peerId: c.caller, outgoing: false, video: c.video, phase: 'incoming', startedAt: null, emoji: null,
-  verified: false, relay: false, mic: true, cam: c.video, peerMic: true, peerCam: c.video, reason: null, rev: 0,
+  verified: false, relay: false, mic: true, cam: c.video, peerMic: true, peerCam: c.video, net: 3, peerNet: 3, outPaused: false, inPaused: false, reason: null, rev: 0,
 });
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -272,7 +283,7 @@ export async function toggleCam(): Promise<void> {
     if (cur !== a || a.ended) { cam.stop(); return; }
     a.cam = cam;
     a.local.addTrack(cam);
-    await sender?.replaceTrack(cam);
+    if (!a.view.outPaused) await sender?.replaceTrack(cam);
     await capBitrate(a);
     view({ cam: true, rev: a.view.rev + 1 });
   }
@@ -294,7 +305,7 @@ export async function switchDevice(kind: 'mic' | 'camera' | 'speaker'): Promise<
   }
   if (kind === 'camera' && a.cam) {
     const { track } = await getCamera(p);
-    await videoSender(a)?.replaceTrack(track);
+    if (!a.view.outPaused) await videoSender(a)?.replaceTrack(track);
     a.local.removeTrack(a.cam); a.cam.stop();
     a.cam = track; a.local.addTrack(track);
     view({ rev: a.view.rev + 1 });
@@ -446,7 +457,14 @@ function openPeer(a: Active): void {
   // состояние микрофона и камеры — отдельным каналом (DTLS); договорённый заранее id, без лишнего согласования
   a.dc = pc.createDataChannel('state', { negotiated: true, id: 0 });
   a.dc.onopen = () => shareMedia(a);
-  a.dc.onmessage = (e) => { try { const m = JSON.parse(String(e.data)); if (m?.media) onPeerMedia(a, m.media); } catch { /* мусор */ } };
+  a.dc.onmessage = (e) => {
+    try {
+      const m = JSON.parse(String(e.data));
+      if (m?.media) onPeerMedia(a, m.media);
+      if (typeof m?.net === 'number' && m.net >= 0 && m.net <= 3) { view({ peerNet: m.net as NetLevel }); void capBitrate(a); }
+      if (typeof m?.pause === 'boolean') void pauseOut(a, m.pause);
+    } catch { /* мусор */ }
+  };
   pc.onicecandidate = (e) => { if (e.candidate) void seal(a, { candidate: e.candidate.toJSON() }); };
   pc.ontrack = (e) => {
     a.remote.addTrack(e.track);
@@ -508,8 +526,37 @@ async function capBitrate(a: Active): Promise<void> {
   if (!s) return;
   const p = s.getParameters();
   if (!p.encodings?.length) return;
-  p.encodings[0].maxBitrate = VIDEO_BITRATE[getPrefs().calls.video];
+  const cap = videoCap(Math.min(a.view.net, a.view.peerNet) as NetLevel, VIDEO_BITRATE[getPrefs().calls.video]);
+  p.encodings[0].maxBitrate = cap.maxBitrate;
+  p.encodings[0].scaleResolutionDownBy = cap.scale;
   await s.setParameters(p).catch(() => {});
+}
+
+/** Замер качества: свой уровень — на экран и собеседнику; очень плохой приём три замера подряд — попросить
+ *  собеседника поставить видео на паузу (звук важнее), три хороших — снова включить. */
+async function measure(a: Active): Promise<void> {
+  if (!a.pc || cur !== a || a.ended) return;
+  const report = await a.pc.getStats().catch(() => null);
+  if (!report || cur !== a || a.ended) return;
+  const real = sampleOf(report.values() as never, a.counters);
+  const level = a.smooth(levelOf(typeof __DEV__ !== 'undefined' && __DEV__ && a.fakeNet ? a.fakeNet : real));
+  if (level !== a.view.net) {
+    view({ net: level });
+    if (a.dc?.readyState === 'open') a.dc.send(JSON.stringify({ net: level }));
+    void capBitrate(a);
+  }
+  a.bad = level === 0 ? a.bad + 1 : 0;
+  a.good = level >= 2 ? a.good + 1 : 0;
+  const ask = (pause: boolean) => { view({ inPaused: pause }); if (a.dc?.readyState === 'open') a.dc.send(JSON.stringify({ pause })); };
+  if (!a.view.inPaused && a.bad >= PAUSE_AFTER && a.view.peerCam) ask(true);
+  else if (a.view.inPaused && a.good >= PAUSE_AFTER) ask(false);
+}
+
+/** Собеседник просит паузу видео (у него очень слабый приём): дорожка снимается с отправителя, камера не гаснет. */
+async function pauseOut(a: Active, pause: boolean): Promise<void> {
+  if (a.view.outPaused === pause) return;
+  view({ outPaused: pause });
+  await videoSender(a)?.replaceTrack(pause ? null : a.cam).catch(() => {});
 }
 
 function onConnection(a: Active): void {
@@ -524,6 +571,7 @@ function onConnection(a: Active): void {
     if (first) {
       sounds.connected(vol());
       a.ping ??= setInterval(() => void send({ op: 'callPing', callId: a.view.callId }).catch(() => {}), CALL_PING_MS);
+      a.stats ??= setInterval(() => void measure(a), STATS_MS);
       void verifyTransport(a);
     }
   }
@@ -592,6 +640,7 @@ function finish(a: Active, reason: CallFailure, sound: boolean, duration?: numbe
   for (const t of a.timers) clearTimeout(t);
   a.timers.clear();
   if (a.ping) clearInterval(a.ping);
+  if (a.stats) clearInterval(a.stats);
   if (a.disconnectTimer) clearTimeout(a.disconnectTimer);
   a.dc?.close();
   a.pc?.close();
@@ -631,9 +680,10 @@ async function resync(): Promise<void> {
 
 function fresh(v: Pick<CallView, 'callId' | 'chatId' | 'peerId' | 'outgoing' | 'video' | 'phase'>, caller: number, callee: number): Active {
   return {
-    view: { ...v, startedAt: null, emoji: null, verified: false, relay: false, mic: true, cam: false, peerMic: true, peerCam: false, reason: null, rev: 0 },
+    view: { ...v, startedAt: null, emoji: null, verified: false, relay: false, mic: true, cam: false, peerMic: true, peerCam: false, net: 3, peerNet: 3, outPaused: false, inPaused: false, reason: null, rev: 0 },
     commit: '', caller, callee, mine: null, session: null, inbox: [], iceServers: null, peerHello: null, pc: null, dc: null, cert: null,
     local: new MediaStream(), remote: new MediaStream(), audio: null, mic: null, cam: null, makingOffer: false, ignoreOffer: false,
+    stats: null, smooth: smoother(), counters: { lost: 0, recv: 0 }, bad: 0, good: 0,
     timers: new Set(), ping: null, releaseLock: null, releaseRing: null, lastRestart: 0, disconnectTimer: null, reconnectSince: null, ended: false, rung: false,
   };
 }

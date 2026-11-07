@@ -1900,3 +1900,8 @@ span.app-log-ava { cursor: default; }
 .app-pip-btn { width: 44px; height: 44px; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); color: #fff; cursor: pointer; backdrop-filter: blur(8px); }
 .app-pip-btn.is-off { background: #fff; color: #111; }
 .app-pip-btn.is-danger { background: var(--danger); color: #fff; }
+
+/* качество связи (calls/quality.ts): плашка на экране звонка и значок на плитке группового */
+.app-call-net { color: #ffd166; }
+.app-gtile-net { color: #ffd166; }
+.app-gcall-badnet { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; }
