@@ -26,3 +26,18 @@ test('production refuses plain internal connections and dev logins — no bypass
   expect(() => assertTransportSecure({ ...ok, LOG_LOGIN_CODES: '1' })).toThrow('LOG_LOGIN_CODES');
   expect(() => assertTransportSecure({ DB_SSL: 'disable' })).not.toThrow();   // dev
 });
+
+test('production code delivery: telegram only with a token and an owner chat id; dev and log channels refused', () => {
+  const ok = { NODE_ENV: 'production', DB_SSL: 'verify-full', VALKEY_URL: 'rediss://v', S3_ENDPOINT: 'https://s3', MEILI_URL: 'https://m', KEY_SERVICE_URL: 'https://k' };
+  const tg = { ...ok, CODE_DELIVERY: 'telegram', TELEGRAM_BOT_TOKEN: '1:abc', TELEGRAM_OWNER_CHAT_ID: '12345' };
+  expect(() => assertTransportSecure(tg)).not.toThrow();
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_BOT_TOKEN: '' })).toThrow('TELEGRAM_BOT_TOKEN');
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_OWNER_CHAT_ID: undefined })).toThrow('TELEGRAM_OWNER_CHAT_ID');
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_OWNER_CHAT_ID: '@owner' })).toThrow('TELEGRAM_OWNER_CHAT_ID');
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_API_URL: 'http://mock' })).toThrow('TELEGRAM_API_URL');
+  expect(() => assertTransportSecure({ ...ok, CODE_DELIVERY: 'log' })).toThrow('CODE_DELIVERY=log');
+  expect(() => assertTransportSecure({ ...ok, CODE_DELIVERY: 'dev' })).toThrow('CODE_DELIVERY=dev');
+  expect(() => assertTransportSecure({ ...ok, CODE_DELIVERY: 'sms' })).toThrow('CODE_DELIVERY must be');
+  // а dev-флаги по-прежнему отказ, даже рядом с telegram
+  expect(() => assertTransportSecure({ ...tg, LOG_LOGIN_CODES: '1' })).toThrow('LOG_LOGIN_CODES');
+});

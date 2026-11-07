@@ -140,7 +140,8 @@ export async function startRecovery(pendingId: unknown): Promise<{ emailPattern:
     await tx`insert into password_recovery (pending_id, code_hash, expires_at) values (${p.id}, ${hashCode(code)}, now() + ${RECOVERY_MIN + ' minutes'}::interval)
               on conflict (pending_id) do update set code_hash = excluded.code_hash, sends = password_recovery.sends + 1, expires_at = excluded.expires_at`;
     // код — под secret: в jobs_dead не копируется; письмо, не ушедшее за срок жизни кода, бесполезно
-    await enqueue(tx, 'mail.recovery', { to: pw.email as string, secret: { code } }, { maxAttempts: 5 });
+    const expiresAt = new Date(Date.now() + RECOVERY_MIN * 60_000).toISOString();
+    await enqueue(tx, 'mail.recovery', { to: pw.email as string, expiresAt, secret: { code } }, { maxAttempts: 5 });
   });
   return { emailPattern: maskEmail(pw.email as string) };
 }

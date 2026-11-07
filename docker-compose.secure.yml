@@ -13,7 +13,8 @@
 #     подписанные запросы к объектам (docker/nginx/production.conf, INFRA-2);
 #   - образы без исходников на томах, без --watch, файловая система только для чтения, временные файлы — tmpfs
 #     (расшифрованные медиа воркера не ложатся на диск, CRYPTO-14), процесс не от root (INFRA-5);
-#   - HSTS (INFRA-3), dev-входы выключены и запрещены (INFRA-6).
+#   - HSTS (INFRA-3), dev-входы выключены и запрещены (INFRA-6); коды входа — ботом Telegram владельцу
+#     (TELEGRAM_BOT_TOKEN, TELEGRAM_OWNER_CHAT_ID в .env — docs/code-delivery.md).
 #
 # Индекс поиска хранит только HMAC-токены слов (search/tokens.ts), но всё равно изолирован:
 #   - Meilisearch в своей внутренней сети `search` — его видят только server и worker;
@@ -49,8 +50,18 @@ x-tls-client: &tls-client
   KMS_PROVIDER: service
   KEY_SERVICE_URL: https://keys:7800
   DEV_LOGIN: "0"
+  LOG_LOGIN_CODES: "0"   # в базовом файле по умолчанию 1 — production с ним не стартует (tls.ts)
   DEV_MIGRATE: "0"
   NODE_ENV: production
+
+# коды входа и регистрации (domain/codeDelivery.ts, docs/code-delivery.md): бот Telegram шлёт их в чат владельца.
+# Нужны и server (проверка старта), и worker (отправка); без токена или id чата production не стартует (tls.ts).
+x-code-delivery: &code-delivery
+  CODE_DELIVERY: ${CODE_DELIVERY:-telegram}
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN (docs/code-delivery.md)}
+  TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:?set TELEGRAM_OWNER_CHAT_ID (docs/code-delivery.md)}
+  TELEGRAM_DAILY_CAP: ${TELEGRAM_DAILY_CAP:-300}
+  CODE_TIME_ZONE: ${CODE_TIME_ZONE:-UTC}
 
 x-hardened: &hardened
   read_only: true
@@ -164,7 +175,7 @@ services:
     command: ["bun", "apps/server/src/main.ts"]
     <<: *hardened
     environment:
-      <<: *tls-client
+      <<: [*tls-client, *code-delivery]
       # звонки: публичный адрес TURN и общий с ним секрет учёток (обязательны в боевом режиме)
       RELAY_STUN_URLS: "stun:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478"
       RELAY_TURN_URLS: "turn:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478?transport=udp,turn:${RELAY_TURN_HOST}:3478?transport=tcp"
@@ -185,7 +196,7 @@ services:
     # медиа расшифровываются во временные файлы: только в памяти, на диск не ложатся (CRYPTO-14)
     tmpfs: ["/tmp:size=2g,mode=1777"]
     environment:
-      <<: *tls-client
+      <<: [*tls-client, *code-delivery]
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?set MEILI_MASTER_KEY}
       KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
     networks: [default, data, search, keys]
