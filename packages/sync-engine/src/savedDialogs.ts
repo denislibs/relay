@@ -238,7 +238,10 @@ export function savedDialogsResult(store: Store, ops: readonly OpLike[]): Result
   const list = savedOrder(rows);
   const out: Result = { items: new Map(), sig: new Map(), order: [] };
   for (const it of list) { out.items.set(it.key, it); out.sig.set(it.key, JSON.stringify(it)); out.order.push(it.key); }
-  const meta: Item = { key: '~saved', loaded: cache.meta.loaded, total: Math.max(0, cache.meta.total - [...gone].filter((p) => cache.rows.has(p)).length), messages: cache.meta.messages, done: cache.meta.next == null, chatId: savedChatOf(store)?.id ?? null };
+  // подчат, скрытый ожидающим удалением, может снова оказаться в кэше (событие сервера пришло после локального удаления):
+  // вычесть и его, и его сообщения — иначе счётчик сообщений отстаёт до ответа сервера
+  const hidden = [...gone].map((p) => cache.rows.get(p)).filter((r) => r != null);
+  const meta: Item = { key: '~saved', loaded: cache.meta.loaded, total: Math.max(0, cache.meta.total - hidden.length), messages: Math.max(0, cache.meta.messages - hidden.reduce((n, r) => n + r.count, 0)), done: cache.meta.next == null, chatId: savedChatOf(store)?.id ?? null };
   out.items.set(meta.key, meta); out.sig.set(meta.key, JSON.stringify(meta)); out.order.push(meta.key);
   return out;
 }
