@@ -1,5 +1,5 @@
 import { warmBackground } from '../../calls/background';
-import { CheckRow, InfoRow, PanelHeader, RangeRow, Section, SelectRow } from '@relay/ui';
+import { SwitchRow, InfoRow, PanelHeader, RangeRow, Section, SelectRow } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { failureOf, getCamera, getMic, levelMeter, listDevices, canPickSpeaker, type MediaFailure } from '../../calls/media';
 import { soundSink, sounds } from '../../calls/sounds';
@@ -99,8 +99,8 @@ export function Calls() {
             <i style={{ transform: `scaleX(${micOn ? level : 0})` }} />
           </div>
           <InfoRow icon={micOn ? 'micOff' : 'mic'} title={micOn ? 'Остановить проверку' : 'Проверить микрофон'} onClick={() => void (micOn ? stopMic() : startMic())} />
-          <CheckRow setting="calls.noise" label="Шумоподавление" checked={p.noise} onChange={(on: boolean) => setPrefs({ 'calls.noise': on })} />
-          <CheckRow setting="calls.agc" label="Автоматическая громкость" checked={p.agc} onChange={(on: boolean) => setPrefs({ 'calls.agc': on })} />
+          <SwitchRow setting="calls.noise" label="Шумоподавление" checked={p.noise} onChange={(on: boolean) => setPrefs({ 'calls.noise': on })} />
+          <SwitchRow setting="calls.agc" label="Автоматическая громкость" checked={p.agc} onChange={(on: boolean) => setPrefs({ 'calls.agc': on })} />
         </Section>
         {canPickSpeaker() ? (
           <Section setting="calls.speaker" title="Динамики">
@@ -121,7 +121,7 @@ export function Calls() {
             onChange={(v: string | number) => setPrefs({ 'calls.video': v })} />
         </Section>
         <Section setting="calls.ring" title="Входящие" footer="Если выключить, это устройство не будет звонить; пропущенные звонки останутся в чате.">
-          <CheckRow setting="calls.accept" label="Принимать звонки на этом устройстве" checked={p.accept} onChange={(on: boolean) => setPrefs({ 'calls.accept': on })} />
+          <SwitchRow setting="calls.accept" label="Принимать звонки на этом устройстве" checked={p.accept} onChange={(on: boolean) => setPrefs({ 'calls.accept': on })} />
           <SelectRow setting="calls.ringtone" label="Мелодия" value={p.ringtone}
             options={RINGTONES.map((r) => ({ value: r, label: RING_LABEL[r] ?? r }))}
             onChange={(v: string | number) => { setPrefs({ 'calls.ringtone': String(v) }); void soundSink(p.speaker).then(() => sounds.preview(String(v), p.volume)); }} />

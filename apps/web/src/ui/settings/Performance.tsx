@@ -1,4 +1,4 @@
-import { CheckRow, PanelHeader, RangeRow, Section } from '@relay/ui';
+import { SwitchRow, PanelHeader, RangeRow, Section } from '@relay/ui';
 import { useGlobal } from '../../global';
 import { back } from '../../nav';
 import { levelOf, setPref } from '../../prefs';
@@ -29,20 +29,20 @@ export function Performance() {
         </Section>
         {reduced ? <p class="app-perf-note">В системе включено уменьшение движения — анимации интерфейса отключены.</p> : null}
         <Section title="Интерфейс">
-          <CheckRow setting="performance.ui" label="Анимации интерфейса" subtitle="Переходы, появление, перестановки, меню" checked={a.ui && !reduced} disabled={reduced} onChange={flag('ui')} />
-          <CheckRow setting="performance.wallpaper" label="Анимация обоев" subtitle="Перелив фона при отправке" checked={a.wallpaper} onChange={flag('wallpaper')} />
-          <CheckRow setting="performance.blur" label="Размытие" subtitle="Стеклянные панели и меню" checked={a.blur} onChange={flag('blur')} />
+          <SwitchRow setting="performance.ui" label="Анимации интерфейса" subtitle="Переходы, появление, перестановки, меню" checked={a.ui && !reduced} disabled={reduced} onChange={flag('ui')} />
+          <SwitchRow setting="performance.wallpaper" label="Анимация обоев" subtitle="Перелив фона при отправке" checked={a.wallpaper} onChange={flag('wallpaper')} />
+          <SwitchRow setting="performance.blur" label="Размытие" subtitle="Стеклянные панели и меню" checked={a.blur} onChange={flag('blur')} />
         </Section>
         <Section setting="performance.autoplay" title="Автовоспроизведение">
-          <CheckRow setting="performance.autoplay.gif" label="GIF" checked={a.autoplayGif} onChange={flag('autoplayGif')} />
-          <CheckRow setting="performance.autoplay.video" label="Видео" checked={a.autoplayVideo} onChange={flag('autoplayVideo')} />
+          <SwitchRow setting="performance.autoplay.gif" label="GIF" checked={a.autoplayGif} onChange={flag('autoplayGif')} />
+          <SwitchRow setting="performance.autoplay.video" label="Видео" checked={a.autoplayVideo} onChange={flag('autoplayVideo')} />
         </Section>
         <Section title="Стикеры">
-          <CheckRow setting="performance.stickers" label="Анимированные стикеры" subtitle="Играют в чатах и в панели стикеров" checked={a.autoplayStickers} onChange={flag('autoplayStickers')} />
-          <CheckRow setting="performance.loopStickers" label="Зацикливать стикеры" subtitle="Иначе стикер в чате проигрывается один раз" checked={a.loopStickers} disabled={!a.autoplayStickers} onChange={flag('loopStickers')} />
+          <SwitchRow setting="performance.stickers" label="Анимированные стикеры" subtitle="Играют в чатах и в панели стикеров" checked={a.autoplayStickers} onChange={flag('autoplayStickers')} />
+          <SwitchRow setting="performance.loopStickers" label="Зацикливать стикеры" subtitle="Иначе стикер в чате проигрывается один раз" checked={a.loopStickers} disabled={!a.autoplayStickers} onChange={flag('loopStickers')} />
         </Section>
         <Section title="Эмодзи">
-          <CheckRow setting="performance.bigEmoji" label="Крупные эмодзи" subtitle="Сообщение из одних эмодзи — крупно, один эмодзи — анимированный" checked={bigEmoji} onChange={(v: boolean) => setPref('bigEmoji', v)} />
+          <SwitchRow setting="performance.bigEmoji" label="Крупные эмодзи" subtitle="Сообщение из одних эмодзи — крупно, один эмодзи — анимированный" checked={bigEmoji} onChange={(v: boolean) => setPref('bigEmoji', v)} />
         </Section>
       </div>
     </div>
