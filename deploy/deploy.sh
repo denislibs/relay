@@ -37,6 +37,10 @@ main() {
   sha=$(git -C "$RELAY_DIR" rev-parse --verify --quiet "$sha^{commit}") || die "unknown commit: $1 (pushed to origin?)"
   prev=$(cat "$STATE_DIR/current" 2>/dev/null || true)
   log "deploy $sha (current: ${prev:-none})"
+  # посторонний файл в secrets/run — до любых изменений (имя не печатается: им может оказаться сам секрет). Имена —
+  # и этого checkout, и выкатываемого коммита: PR, добавивший секрет, не упирается в прежний список
+  SECRET_NAMES="$SECRET_NAMES $(secret_names_at "$sha")"
+  [ "$(secrets_unexpected)" = 0 ] || die "unexpected file(s) in secrets/run — names not shown; keep only: $SECRET_NAMES (deploy/set-secret.sh)"
 
   if release "$sha"; then
     [ "$prev" = "$sha" ] || printf '%s\n' "$prev" > "$STATE_DIR/previous"
@@ -75,8 +79,6 @@ preflight() {
   if [ "$(env_get RELAY_OBSERVABILITY)" = 1 ]; then
     [ -s "$SECRETS_RUN/alert_bot_token" ] || die "secrets/run/alert_bot_token is empty: deploy/set-secret.sh alert_bot_token (docs/observability.md)"
   fi
-  # посторонний файл в secrets/run — до любых изменений (имя не печатается: им может оказаться сам секрет)
-  [ "$(secrets_unexpected)" = 0 ] || die "unexpected file(s) in secrets/run — names not shown; keep only: $SECRET_NAMES (deploy/set-secret.sh)"
   case "$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")" in
     600 | 400) ;;
     *) die "$ENV_FILE must be chmod 600" ;;
