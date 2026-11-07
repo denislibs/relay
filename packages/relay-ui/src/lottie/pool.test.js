@@ -1,4 +1,4 @@
-import { beforeEach, expect, test } from 'bun:test';
+import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { __setFrameBudget, __setWorkerFactory, configureLottie, liveRenderers, lottieStats, openRenderer } from './pool.js';
 
 // поддельный воркер: отвечает на open/frame и запоминает сообщения
@@ -22,6 +22,8 @@ beforeEach(() => {
   configureLottie({ workerUrl: 'w.js', wasm: { simd: 's.wasm', noSimd: 'n.wasm' } });
 });
 const sent = (t) => made.flatMap((w) => w.sent.filter((m) => m.t === t));
+// бюджет — общий для всего процесса bun test: не оставлять сжатым для файлов, что идут следом (player.test.js)
+afterAll(() => __setFrameBudget(32 << 20));
 
 test('the same animation at the same size is one renderer; the last release closes it', async () => {
   const a = await openRenderer({ url: '/stk/duck/aaaaaaaa/1.tgs', px: 400 });

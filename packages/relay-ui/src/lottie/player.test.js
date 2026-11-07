@@ -1,7 +1,7 @@
 import { beforeEach, expect, test } from 'bun:test';
 
 globalThis.requestAnimationFrame ??= (fn) => setTimeout(() => fn(performance.now()), 0);
-const { __setWorkerFactory, configureLottie, lottieStats } = await import('./pool.js');
+const { __setFrameBudget, __setWorkerFactory, configureLottie, lottieStats } = await import('./pool.js');
 const { attachSticker, setStickerGroupExclusive, stickerStats } = await import('./player.js');
 
 let made;
@@ -18,7 +18,11 @@ class FakeWorker {
 const canvas = () => ({ width: 0, height: 0, draws: 0, getContext() { const c = this; return { clearRect() {}, drawImage() { c.draws++; } }; } });
 const sent = (t) => made.flatMap((w) => w.sent.filter((m) => m.t === t));
 const wait = (ms = 40) => new Promise((r) => setTimeout(r, ms));
-beforeEach(() => { made = []; __setWorkerFactory(() => new FakeWorker()); configureLottie({ workerUrl: 'w', wasm: { simd: 's', noSimd: 'n' } }); });
+/** Ждать условие, а не время: на медленной машине (CI) таймеры запаздывают, и «через 400 мс» анимация уже доиграла. */
+const until = async (cond, ms = 10_000) => { const end = Date.now() + ms; while (!cond()) { if (Date.now() > end) throw new Error('until: timeout'); await wait(5); } };
+// бюджет кэша кадров — общий для процесса: pool.test.js его сжимает, а bun гоняет файлы в одном процессе и в порядке
+// каталога (в CI pool.test.js шёл раньше — здесь кэш держал один кадр). Свой — в каждом тесте
+beforeEach(() => { made = []; __setFrameBudget(32 << 20); __setWorkerFactory(() => new FakeWorker()); configureLottie({ workerUrl: 'w', wasm: { simd: 's', noSimd: 'n' } }); });
 
 test('copies of one sticker share a clock; the first frame is drawn even before it is visible', async () => {
   const a = canvas(), b = canvas();
@@ -114,10 +118,11 @@ test('a sticker that played once and stopped keeps only its shown frame (picker 
   const v = attachSticker({ url: '/stk/x/aaaaaaaa/8.tgs', px: 64, canvas: canvas(), loop: false });
   await wait();
   v.setVisible(true);
-  await wait(400);
-  expect(lottieStats().cachedFrames).toBeGreaterThan(1);         // играет — кэш копится
-  await wait(1000);
-  expect(stickerStats().playing).toBe(0);
+  // пока играет — кэш копится: наибольший размер кэша за проигрыш, сколько бы ни длился шаг таймера
+  let most = 0;
+  await until(() => { if (stickerStats().playing) most = Math.max(most, lottieStats().cachedFrames); return stickerStats().playing === 0; });
+  expect(most).toBeGreaterThan(1);
+  await until(() => lottieStats().cachedFrames <= 1);
   expect(lottieStats().cachedFrames).toBe(1);                    // остановилась на последнем кадре — только он
   v.destroy();
 });

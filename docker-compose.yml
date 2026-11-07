@@ -274,6 +274,12 @@ services:
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
+      # зависимости — из образа, а не с хоста: bun кладёт их в node_modules каждого пакета, и монтирование исходников
+      # их бы закрыло (на чистом checkout и в CI их на хосте нет). Анонимный том берёт содержимое образа, run --rm его удаляет
+      - /app/apps/server/node_modules
+      - /app/apps/web/node_modules
+      - /app/packages/relay-ui/node_modules
+      - /app/packages/sync-engine/node_modules
     depends_on:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
@@ -302,6 +308,12 @@ services:
     volumes:
       - ./apps:/app/apps
       - ./packages:/app/packages
+      # зависимости — из образа, а не с хоста: bun кладёт их в node_modules каждого пакета, и монтирование исходников
+      # их бы закрыло (на чистом checkout и в CI их на хосте нет). Анонимный том берёт содержимое образа, run --rm его удаляет
+      - /app/apps/server/node_modules
+      - /app/apps/web/node_modules
+      - /app/packages/relay-ui/node_modules
+      - /app/packages/sync-engine/node_modules
     depends_on:
       postgres: { condition: service_healthy }
       s3-init-test: { condition: service_completed_successfully }
