@@ -43,7 +43,7 @@ SECRETS_RUN="$RELAY_DIR/secrets/run"
 # оказаться сам секрет (вставили токен вместо имени), а вывод deploy.sh виден в публичном логе GitHub Actions.
 SECRET_NAMES="pg_password valkey_password s3_access_key_id s3_secret_access_key meili_master_key meili_search_key
 key_token_server key_token_worker key_service_tokens key_service_audit_key vault_token bao_backup_token turn_secret
-livekit_api_key livekit_api_secret livekit_keys telegram_bot_token telegram_webhook_secret grafana_admin_password"
+livekit_api_key livekit_api_secret livekit_keys telegram_bot_token telegram_webhook_secret grafana_admin_password alert_bot_token"
 SECRET_NAMES=$(printf '%s' "$SECRET_NAMES" | tr '\n' ' ')   # одной строкой через пробел
 
 is_secret_name() { case " $SECRET_NAMES " in *" $1 "*) [ -n "$1" ] ;; *) return 1 ;; esac; }

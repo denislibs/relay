@@ -97,8 +97,9 @@ gitleaks (`.gitleaks.toml`: исключены только dev-значения
 | `telegram_bot_token` | **владелец** (BotFather) | server, worker |
 | `telegram_webhook_secret` | make-secrets | server, worker |
 | `grafana_admin_password` | make-secrets | grafana (`GF_SECURITY_ADMIN_PASSWORD__FILE`; только с наблюдаемостью) |
+| `alert_bot_token` | **владелец** (BotFather, отдельный бот) | alertmanager (`bot_token_file`; только с наблюдаемостью) |
 
-Токен бота монтируется и alertmanager (`bot_token_file`), если включена наблюдаемость. Процессы alertmanager и
+Бот тревог — не тот, что шлёт коды входа ([observability.md](observability.md), «Запуск»). Процессы alertmanager и
 Grafana не root — им добавлена группа 1000.
 
 Вне `secrets/run`:
