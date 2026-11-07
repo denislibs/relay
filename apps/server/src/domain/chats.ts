@@ -320,6 +320,10 @@ export async function countChats(userId: number): Promise<number> {
      where cm.user_id = ${userId} and not cm.archived   -- архив — не в «Все»
        and c.deleted_at is null
        and not (c.kind = 'direct' and cm.history_from > 0 and coalesce(sv.hidden, true)
+                and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted and (m.expires_at is null or m.expires_at > now())))
+       -- пустое «Избранное» в списке клиента не показывается (как в Telegram: строка — с первым сообщением), не считаем и его
+       and not (sv.chat_id is not null and cm.pinned_at is null
+                and not exists (select 1 from drafts d where d.user_id = ${userId} and d.chat_id = c.id)
                 and not exists (select 1 from messages m where m.chat_id = c.id and m.id >= cm.history_from and not m.deleted and (m.expires_at is null or m.expires_at > now())))`;
   return r.n as number;
 }

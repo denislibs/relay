@@ -1,7 +1,7 @@
 import { EmptyState, PanelHeader, WindowList } from '@relay/ui';
 import type { Item } from '@relay/sync-engine/src/types';
 import { useRef, useState } from 'preact/hooks';
-import { isArchived } from '../chatFlags';
+import { isArchived, isEmptySaved } from '../chatFlags';
 import { useGlobal } from '../global';
 import { isMuted } from '../mute';
 import { back } from '../nav';
@@ -20,7 +20,7 @@ export function Archive() {
   const me = useGlobal((s) => s.me)!;
   const chats = useGlobal((s) => s.chats);
   const openId = useGlobal((s) => s.pendingChatId ?? s.openChatId);
-  const list = chats.filter(isArchived);
+  const list = chats.filter((c) => isArchived(c) && !isEmptySaved(c));
   const [menu, setMenu] = useState<{ id: number; x: number; y: number } | null>(null);
   const onMenu = useRef((id: number, x: number, y: number) => setMenu({ id, x, y })).current;
   const mode = useChatSelectMode('archive', list);
