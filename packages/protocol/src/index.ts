@@ -16,9 +16,10 @@ export type ServiceType = 'login_code' | 'new_login' | 'group_created' | 'channe
   | 'scheduled_failed'   // отложенное не удалось отправить: текст — куда и почему (сам текст сообщения не раскрывается)
   | 'theme_changed'   // тема чата: data.emoji/title — новая, пусто — снята   // чек-лист: автор отметил / добавил задачи в список replyToId (номера — в data)
   | 'auto_delete_changed'   // автоудаление: data.sec — новый срок в секундах, нет — выключено
-  | 'call';   // звонок: data.call — видео ли, чем кончился и сколько длился; автор — звонящий
+  | 'call'   // звонок: data.call — видео ли, чем кончился и сколько длился; автор — звонящий
+  | 'group_call';   // групповой звонок: data.groupCall — начат / завершён (и сколько длился); автор — начавший
 /** Участники служебного события (имена на момент события), новое название и новое фото (photo_changed). */
-export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto; call?: CallServiceData }   // group_created / channel_created: тело — название, автор — создатель
+export interface ServiceData { users?: { id: Id; name: string }[]; title?: string; completed?: number[]; incompleted?: number[]; items?: number[]; emoji?: string; sec?: number; photo?: ProfilePhoto; call?: CallServiceData; groupCall?: GroupCallServiceData }   // group_created / channel_created: тело — название, автор — создатель
 
 export interface Message {
   id: Id;
@@ -398,6 +399,7 @@ export type Update =
   | { type: 'members'; chatId: Id; upsert: MemberRow[]; remove: Id[] }
   // чат больше не мой: вышел, удалили, группу удалили
   | { type: 'chatAutoDelete'; chatId: Id; sec: number | null }   // срок автоудаления чата сменился (null — выключено)
+  | { type: 'groupCall'; chatId: Id; call: GroupCallSummary | null }   // в группе идёт звонок (плашка «Идёт звонок»), null — закончился
   | { type: 'chatTheme'; chatId: Id; theme: string | null }   // тема чата сменилась (id из GET /themes, null — снята)
   /** Подчат «Избранного» изменился: итоги владельцу (count 0 — исчез). Содержимого нет: последнее — по lastId из кэша или страницей. */
   | { type: 'savedDialog'; chatId: Id; peer: string; count: number; lastId: number | null; pinnedAt: number | null; dialogs: number; messages: number }
@@ -548,6 +550,7 @@ export type ClientFrame =
   // нажата callback-кнопка; ack.result — ButtonAnswer
   | { op: 'button'; reqId: string; chatId: Id; id: Id; data: string }
   | CallClientFrame
+  | GroupCallClientFrame
   | { op: 'ping' };
 
 /** Ответ на нажатие кнопки: короткий тост (нет — молча). */
@@ -584,6 +587,7 @@ export type ServerFrame =
   // terminated — с другого устройства, автозавершением или сеанс пропал
   | { op: 'sessionTerminated'; reason?: 'logout' | 'terminated' }
   | CallServerFrame
+  | GroupCallServerFrame
   | { op: 'pong' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -655,7 +659,7 @@ export function parseClientFrame(raw: string): ClientFrame | null {
       return { op: 'send', ...(f.silent === true ? { silent: true } : {}), ...(f.scheduleAt != null ? { scheduleAt: f.scheduleAt as number } : {}), ...(f.draftHash !== undefined ? { draftHash: f.draftHash as string | null } : {}), ...(f.threadId != null ? { threadId: f.threadId as number } : {}), ...(f.sticker != null ? { sticker: { id: (f.sticker as { id: number }).id } } : {}), ...(f.todo != null ? { todo: normalizeTodo(f.todo)! } : {}), ...(f.poll != null ? { poll: normalizePoll(f.poll)! } : {}), ...(f.geo != null ? { geo: normalizeGeo(f.geo)! } : {}), ...(f.dice != null ? { dice: { emoji: (f.dice as { emoji: DiceEmoji }).emoji } } : {}), ...(f.contact != null ? { contact: { userId: (f.contact as { userId: number }).userId, ...(typeof cKey === 'string' ? { key: cKey } : {}), ...(cVia ? { via: { chatId: Number(cVia.chatId), messageId: Number(cVia.messageId) } } : {}) } } : {}), reqId: f.reqId, clientId: f.clientId, chatId: f.chatId, body: f.body, entities: normalizeEntities(f.body, f.entities), replyToId: (f.replyToId as number | null) ?? null, ...(rq != null && f.replyToId != null ? { replyQuote: { text: rq.text as string, offset: rq.offset as number } } : {}), attachment: (f.attachment as { id: string; thumb?: string | null; spoiler?: boolean } | null) ?? null, groupId: (f.groupId as string | null) ?? null, forward, ...(f.noLinkPreview === true ? { noLinkPreview: true } : {}), ...(Array.isArray(f.blocks) ? { blocks: f.blocks as Block[] } : {}) };
     case 'read':
       return str(f.reqId, 64) && int(f.chatId) && int(f.upToId) ? { op: 'read', reqId: f.reqId, chatId: f.chatId, upToId: f.upToId } : null;
-    default: return parseCallFrame(f);
+    default: return parseCallFrame(f) ?? parseGroupCallFrame(f);
   }
 }
 
@@ -737,6 +741,8 @@ export * from './blocks';
 export * from './fileCrypto';
 export * from './mentions';
 export * from './calls';
+export * from './groupCalls';
+import { parseGroupCallFrame, type GroupCallClientFrame, type GroupCallServerFrame, type GroupCallServiceData, type GroupCallSummary } from './groupCalls';
 import { parseCallFrame, type CallClientFrame, type CallServerFrame, type CallServiceData } from './calls';
 
 /** Можно ли править текст сообщения этого вида (как в Telegram): у стикера, кружка, голосового и опроса текста нет,

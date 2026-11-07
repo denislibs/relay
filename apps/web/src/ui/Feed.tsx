@@ -1,3 +1,4 @@
+import { joinGroupCall } from '../calls/groupCall';
 import { isGroupService, serviceText } from './serviceText';
 import type { ServiceData, ServiceType } from '@relay/protocol';
 import type { Item } from '@relay/sync-engine/src/types';
@@ -737,6 +738,8 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
 }) {
   const messages = useGlobal((s) => frameByKey(s, frameKey)?.messages ?? NO_MESSAGES);
   const people = useGlobal((s) => s.people);   // имена и фото авторов пришли — пачки перерисовываются
+  // идущий звонок группы: у строки «начал(а) звонок» — кнопка «Войти»
+  const groupCallId = useGlobal((s) => ((s.chats.find((c) => c.id === chatId)?.groupCall as { callId: string } | null | undefined) ?? null)?.callId ?? null);
   const rxv = useReactionCatalog();              // каталог реакций пришёл — плашки с картинками вместо глифов
   // крупные эмодзи: каталог анимаций грузим, только когда в окне есть сообщение из одного эмодзи
   const bigEmoji = useGlobal((s) => s.prefs.bigEmoji);
@@ -1859,6 +1862,15 @@ export function Feed({ frameKey, active, chatId, threadId, scheduled = false, sa
       flushRun();
       const list = messages.find((x) => x.id === m.replyToId)?.todo as { title: string; items: { id: number; title: string }[] } | undefined;
       out.push(<div class="rl-action" key={m.key} role="note"><span>{todoLine(svc.type, svc.data ?? {}, mine ? 'Вы' : people[m.senderId as number]?.name ?? peerName, list)}</span></div>);
+      prevDay = day; prevSender = null;
+      return;
+    }
+    // групповой звонок начат и ещё идёт — у плашки кнопка «Войти»
+    if (svc?.type === 'group_call' && svc.data?.groupCall?.state === 'started' && groupCallId === svc.data.groupCall.callId) {
+      flushRun();
+      const text = serviceText('group_call', { data: svc.data, body: m.body as string, mine, sender: people[m.senderId as number]?.name ?? peerName, meId });
+      const callId = svc.data.groupCall.callId;
+      out.push(<div class="rl-action app-action-gcall" key={m.key} role="note"><span>{text}</span><button type="button" onClick={() => void joinGroupCall(chatId, callId)}>Войти</button></div>);
       prevDay = day; prevSender = null;
       return;
     }

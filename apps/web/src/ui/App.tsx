@@ -1,3 +1,4 @@
+import { GroupCallLayer } from './call/GroupCall';
 import { CallLayer } from './call/CallLayer';
 import { JoinLink } from './group/JoinLink';
 import { useChatTheme } from '../chatTheme';
@@ -107,6 +108,7 @@ export function App() {
       <NewChat />
       <ModalRoot />
       <CallLayer />
+      <GroupCallLayer />
       <ForwardPicker />
       <JoinLink />
       <NewContact />

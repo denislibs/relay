@@ -49,7 +49,7 @@ MAP = {
     'strike': 'text_strikethrough_outline', 'spoiler': 'spoiler_outline',
     # звонки
     'phoneDown': 'phone_down', 'micOff': 'microphone_slash_outline', 'videoOff': 'videocam_slash_outline@28', 'screen': 'screencast_outline',
-    'cameraSwitch': 'rotate_right_outline@28', 'speaker': 'volume_outline@28',
+    'cameraSwitch': 'rotate_right_outline@28', 'speaker': 'volume_outline@28', 'raiseHand': 'hand@28',
 }
 
 # *Filled where the solid VK glyph is not simply "<outline name without _outline>"

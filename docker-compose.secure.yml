@@ -169,6 +169,8 @@ services:
       RELAY_STUN_URLS: "stun:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478"
       RELAY_TURN_URLS: "turn:${RELAY_TURN_HOST:?set RELAY_TURN_HOST}:3478?transport=udp,turn:${RELAY_TURN_HOST}:3478?transport=tcp"
       RELAY_TURN_SECRET: ${RELAY_TURN_SECRET:?set RELAY_TURN_SECRET}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET (32+ chars)}
       PORT: "3000"
       TRUST_PROXY: "1"
       MEILI_MASTER_KEY: ""
@@ -188,6 +190,14 @@ services:
       KEY_SERVICE_TOKEN: ${KEY_TOKEN_WORKER:?set KEY_TOKEN_WORKER}
     networks: [default, data, search, keys]
     depends_on: [keys]
+
+  # LiveKit наружу — только медиапорты; ключ и внешний адрес — обязательны
+  livekit:
+    command: !override ["--config", "/etc/livekit.yaml", "--node-ip", "${LIVEKIT_NODE_IP:?set LIVEKIT_NODE_IP (public IP)}"]
+    environment: !override
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:?set LIVEKIT_API_SECRET}"
+    ports: !override ["7881:7881/tcp", "50000-50060:50000-50060/udp"]
+    restart: unless-stopped
 
   # TURN наружу — только его порты; секрет и внешний адрес — обязательны
   turn:

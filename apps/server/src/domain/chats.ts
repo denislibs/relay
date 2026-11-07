@@ -1,3 +1,5 @@
+import { activeGroupCalls } from './groupCalls';
+import type { GroupCallSummary } from '@relay/protocol';
 import { peerKey } from '../crypto/peerKey';
 import { shredHistory } from './shred';
 import { dropScheduledInChat } from './scheduled';
@@ -281,6 +283,7 @@ export type ChatSummary = {
   peerReadUpTo: number; // до какого id мои сообщения прочитаны всеми остальными участниками
   saved?: true;         // «Избранное»: чат с самим собой (domain/saved.ts); peer — null
   theme?: string | null;   // тема чата (id из каталога GET /themes)
+  groupCall?: GroupCallSummary | null;   // группа: идёт звонок (плашка «Идёт звонок»)
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
   muteUntil?: number | null; // уведомления выключены: мс эпохи, 0 — навсегда, null — включены
@@ -407,6 +410,9 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   // последнее сообщение — с реакциями (и у поста канала — с кнопкой комментариев): устройство, узнавшее его только из
   // списка, историю «после» не грузит и иначе показало бы его без плашек до следующей реакции
   await withAllReactions(list.filter((c) => c.last && !c.last.deleted).map((c) => c.last!), userId);
+  // идущие групповые звонки — плашка «Идёт звонок» с первого снимка (дальше — событием groupCall журнала группы)
+  const calls = await activeGroupCalls(list.filter((c) => c.kind === 'group').map((c) => c.id)).catch(() => new Map());
+  for (const c of list) if (c.kind === 'group') (c as ChatSummary).groupCall = calls.get(c.id) ?? null;
   return list;
 }
 

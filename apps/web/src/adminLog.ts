@@ -49,7 +49,7 @@ function diffRights<K extends string>(from: Record<K, boolean> | null, to: Recor
   return parts;
 }
 const MEMBER_KEYS = Object.keys(MEMBER_RIGHT_TEXT) as MemberRight[];
-const ADMIN_KEYS = ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'pin', 'addAdmins'] as AdminRight[];
+const ADMIN_KEYS = ['info', 'post', 'edit', 'delete', 'ban', 'invite', 'pin', 'calls', 'addAdmins'] as AdminRight[];
 
 function inviteDiff(from: InviteFields, to: InviteFields): Seg[] {
   const parts: Seg[][] = [];

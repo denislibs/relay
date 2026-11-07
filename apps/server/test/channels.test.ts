@@ -51,7 +51,7 @@ test('create: a channel with zero members (creator is the owner) and with subscr
   expect(await membersCount(empty)).toBe(1);
   const s0 = await summary(a, empty);
   expect(s0).toMatchObject({ kind: 'channel', group: { title: 'Новости', members: 1, ownerId: a.userId, signatures: false, linkedChatId: null }, me: { role: 'owner' } });
-  expect(s0.me.admin).toEqual({ info: true, post: true, edit: true, delete: true, ban: true, invite: true, pin: false, addAdmins: true });   // pin — право группы, у канала его нет
+  expect(s0.me.admin).toEqual({ info: true, post: true, edit: true, delete: true, ban: true, invite: true, pin: false, calls: false, addAdmins: true });   // pin и calls — права группы, у канала их нет
   expect(s0.peerReadUpTo).toBe(0);
 
   const id = await channel(a, [b, c]);
