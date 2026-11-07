@@ -1,4 +1,6 @@
 import { GROUP_CALL_FACES, GROUP_CALL_MEMBERS_MAX, GROUP_CALL_PING_MS, GROUP_CALL_TITLE_MAX, graphemes, type GroupCallLinkPreview, type GroupCallMember, type GroupCallPlan, type GroupCallServerFrame, type GroupCallSummary } from '@relay/protocol';
+import { liveKitErrors } from '../obs/appMetrics';
+import { log } from '../obs/log';
 import { createHash, createHmac } from 'node:crypto';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
@@ -63,8 +65,8 @@ async function roomService(method: string, room: string, body: Record<string, un
       body: JSON.stringify({ room, ...body }),
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok && res.status !== 404) console.warn('livekit', method, res.status);
-  } catch (e) { console.warn('livekit', method, String(e)); }
+    if (!res.ok && res.status !== 404) { liveKitErrors.inc({ method, reason: String(res.status) }); log.warn('livekit api failed', { method, status: res.status }); }
+  } catch (e) { liveKitErrors.inc({ method, reason: e instanceof Error && e.name === 'TimeoutError' ? 'timeout' : 'network' }); log.warn('livekit api failed', { method, error: e }); }
 }
 
 /** Участник комнаты LiveKit: «u<userId>-s<session>» — сессия нужна, чтобы ключи шли именно в неё. */

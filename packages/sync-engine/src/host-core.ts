@@ -53,14 +53,15 @@ export class HostCore {
   private cfg: EngineConfig | null = null;
   private readonly startedAt = Date.now();
 
-  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine>; kind?: 'shared' | 'dedicated-leader' }) {}
+  /** onError — ошибка хоста (не вкладки) в отчёт на сервер (errorReport.ts) */
+  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine>; kind?: 'shared' | 'dedicated-leader'; onError?: (err: unknown) => void }) {}
 
   get size(): number { return this.clients.size; }
 
   attach(port: PortLike<ToHost, FromHost>): { detach(): void } {
     const c: Client = { port, subs: new Map(), queries: new Map(), buf: [], queued: false, lastSeen: Date.now() };
     this.clients.add(c);
-    port.listen((m) => { this.onMessage(c, m).catch((err) => { console.error('host:', err); this.live?.dev.log.error('host', err); }); });
+    port.listen((m) => { this.onMessage(c, m).catch((err) => { console.error('host:', err); this.live?.dev.log.error('host', err); this.opts.onError?.(err); }); });
     return { detach: () => this.detach(c) };
   }
 

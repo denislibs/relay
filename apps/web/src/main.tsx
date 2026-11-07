@@ -13,6 +13,7 @@ import { enableStrictDom } from '@relay/ui';
 import { render } from 'preact';
 import { closeAllChats, openChat, startData } from './data';
 import { installErrorCapture } from './devtools/metrics';
+import { installErrorReport } from './errorReport';
 import { getGlobal, isPhone, setGlobal, subscribeGlobal, type Me } from './global';
 import * as nav from './nav';
 import { endChatSelect } from './chatSelect';
@@ -49,6 +50,7 @@ if (__DEV__) enableStrictDom({ ignore: /twallpaper/ });
 
 // ошибки главного потока — всегда, в кольцо на 200 (раздел «Для разработчиков» → «Ошибки»)
 installErrorCapture();
+installErrorReport();   // и на сервер: POST /client-errors (errorReport.ts)
 
 const ME_KEY = 'relay.me';
 

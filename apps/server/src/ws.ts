@@ -19,6 +19,8 @@ import { appendTodo, editTodo, toggleTodo } from './domain/todo';
 import { pressButton } from './domain/buttons';
 import { ctxFromRow, hasAdmin } from './domain/groupRights';
 import { allowGroupMember, callLink, currentGroupCall, decideCallRequest, inviteToCall, joinByCallLink, previewCallLink, startConference, endGroupCallBy, joinGroupCall, kickGroupMember, leaveGroupCall, muteGroupMember, setGroupCallSettings, pingGroupCall, relayGroupKeys, startGroupCall, updateGroupMember } from './domain/groupCalls';
+import { log } from './obs/log';
+import { groupCallJoins } from './obs/appMetrics';
 import { acceptCall, confirmCall, currentCall, declineCall, hangupCall, pingCall, receivedCall, relaySignal, requestCall } from './domain/calls';
 
 /** Ждать open сокета (подписки на журналы чатов), но не дольше ms: Valkey недоступен — отвечаем, сверка догонит. */
@@ -27,6 +29,12 @@ const opened = (sock: ChatSocket | undefined, ms = 5000) => sock?.data.opened ? 
 /** publish — разослать кадр в топик (шина Valkey: «печатает…»); у тестов без сокетов — no-op.
  *  sessionId — сеанс сокета (кнопки «Нового входа» отличают этот сеанс от остальных); sock — сам сокет (подписки на журналы чатов). */
 const emojiFxAt = new Map<string, number>();   // последний emojiFx по «пользователь:чат:сообщение»
+
+/** Вход в групповой звонок: исход в relay_group_call_joins_total (ok или код ошибки). */
+async function countJoin<T>(p: Promise<T>, via: 'direct' | 'link' = 'direct'): Promise<T> {
+  try { const r = await p; groupCallJoins.inc({ via, result: 'ok' }); return r; }
+  catch (e) { groupCallJoins.inc({ via, result: e instanceof DomainError ? e.code : 'internal' }); throw e; }
+}
 
 export async function handleFrame(userId: number, frame: ClientFrame, publish: (topic: string, msg: string) => void = () => {}, sessionId?: number, sock?: ChatSocket): Promise<ServerFrame[]> {
   const reqId = 'reqId' in frame ? frame.reqId : undefined;
@@ -177,7 +185,7 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
         if (sessionId == null) throw new DomainError('unauthorized');
         switch (frame.op) {
           case 'groupCallStart': return [{ op: 'ack', reqId: frame.reqId, result: await startGroupCall(userId, frame.chatId) }];
-          case 'groupCallJoin': await limit('groupCallJoin', userId); return [{ op: 'ack', reqId: frame.reqId, result: await joinGroupCall(publish, userId, sessionId, frame) }];
+          case 'groupCallJoin': await limit('groupCallJoin', userId); return [{ op: 'ack', reqId: frame.reqId, result: await countJoin(joinGroupCall(publish, userId, sessionId, frame)) }];
           case 'groupCallGet': return [{ op: 'ack', reqId: frame.reqId, result: { call: await currentGroupCall(userId, frame.chatId) } }];
           case 'groupCallEnd': return [{ op: 'ack', reqId: frame.reqId, result: await endGroupCallBy(publish, userId, frame.callId) }];
           case 'groupCallMute': return [{ op: 'ack', reqId: frame.reqId, result: await muteGroupMember(publish, userId, frame) }];
@@ -187,7 +195,7 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
           case 'groupCallInvite': return [{ op: 'ack', reqId: frame.reqId, result: await inviteToCall(publish, userId, frame) }];
           case 'groupCallLink': return [{ op: 'ack', reqId: frame.reqId, result: await callLink(userId, frame) }];
           case 'groupCallLinkPreview': return [{ op: 'ack', reqId: frame.reqId, result: await previewCallLink(userId, frame.token) }];
-          case 'groupCallLinkJoin': await limit('groupCallJoin', userId); return [{ op: 'ack', reqId: frame.reqId, result: await joinByCallLink(publish, userId, frame.token) }];
+          case 'groupCallLinkJoin': await limit('groupCallJoin', userId); return [{ op: 'ack', reqId: frame.reqId, result: await countJoin(joinByCallLink(publish, userId, frame.token), 'link') }];
           case 'groupCallDecide': return [{ op: 'ack', reqId: frame.reqId, result: await decideCallRequest(publish, userId, frame) }];
           case 'groupCallSettings': return [{ op: 'ack', reqId: frame.reqId, result: await setGroupCallSettings(publish, userId, frame) }];
           case 'groupCallLeave': await leaveGroupCall(publish, frame.callId, sessionId); return [];
@@ -202,7 +210,7 @@ export async function handleFrame(userId: number, frame: ClientFrame, publish: (
     }
   } catch (err) {
     if (err instanceof DomainError) return [{ op: 'err', reqId, code: err.code, retry: false, ...(err.retryAfter ? { retryAfter: err.retryAfter } : {}) }];
-    console.error(err);
+    log.error('ws frame failed', { userId, sessionId, op: frame.op, reqId, error: err });
     return [{ op: 'err', reqId, code: 'internal', retry: true }];
   }
 }

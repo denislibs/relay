@@ -55,6 +55,12 @@ import { emojiGroupsRoute } from './stickers/groups';
 import { reactionsRoute } from './reactions/routes';
 import { animatedEmojiRoute } from './reactions/emoji';
 import { stickerRoute } from './stickers/routes';
+import { finishRequest, logPath, requestCtx, routeGroup } from './obs/httpObs';
+import { log } from './obs/log';
+import { readyResponse } from './obs/ready';
+import { wsCloses, wsConnections, wsFrames } from './obs/appMetrics';
+import { onCollect } from './obs/metrics';
+import { clientReport } from './obs/clientReports';
 
 const STATUS: Record<string, number> = { schedule_past: 400, schedule_far: 400, schedule_limit: 409, bad_frame: 400, pin_limit: 409, too_long: 400, file_too_big: 413, username_invalid: 400, username_reserved: 400, username_taken: 409, bio_too_long: 400, note_too_long: 400, name_invalid: 400, birthday_invalid: 400, links_invalid: 400, folder_title: 400, folder_empty: 400, folder_too_many_chats: 400, folder_emoji: 400, folders_limit: 400, unauthorized: 401, not_member: 403, blocked: 403, not_found: 404, code_invalid: 400, code_expired: 400, flood: 429, fresh_session: 403, device_invalid: 400, password_invalid: 400, password_missing: 400, recovery_unavailable: 400, email_invalid: 400, qr_expired: 400, passkey_not_found: 404, passkey_invalid: 400, forbidden: 403, upload_missing: 409, upload_mismatch: 400, upload_pending: 409, upload_incomplete: 409, upload_limit: 429, upload_quota: 429, photo_invalid: 400 };
 const fail = (code: string, retryAfter?: number) => retryAfter
@@ -118,6 +124,13 @@ const bump = (m: Map<number, number>, k: number, d: number) => { const n = (m.ge
 const overMinute = (w: { at: number; n: number }, max: number, now: number) => { if (now - w.at >= 60_000) { w.at = now; w.n = 0; } return ++w.n > max; };
 const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|calls|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
+// открытые допущенные сокеты процесса — при опросе метрик
+onCollect(() => {
+  let n = 0;
+  for (const c of userSockets.values()) n += c;
+  wsConnections.set({}, n);
+});
+
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
   const bus = createBus((topic, msg) => { server.publish(topic, msg); });
@@ -126,25 +139,34 @@ export function createServer(opts: { port: number }): Server {
   const runFrame = async (ws: import('bun').ServerWebSocket<WsData>, text: string): Promise<void> => {
     const frame = parseClientFrame(text);
     if (!frame) {
+      wsFrames.inc({ op: 'unknown', result: 'bad_frame' });
       ws.send(JSON.stringify({ op: 'err', code: 'bad_frame', retry: false }));
       return;
     }
     // любой кадр (и отправка, и прочтение): раз в минуту — отметка активности и проверка, что сеанс жив;
     // сеанс пропал (NOTIFY мог потеряться) — сокет закрыт, кадр не выполняем
     if (!(await checkSocket(ws.data.sessionId, ws.data).catch(() => true))) return;
+    let result = 'ok';
     for (const out of await handleFrame(ws.data.userId, frame, publish, ws.data.sessionId, ws)) {
+      if (out.op === 'err') result = out.code;
       ws.send(JSON.stringify(out));
       // отказы flood копятся — клиент не ждёт retryAfter, а долбит: закрываем (переподключится с паузой)
-      if (out.op === 'err' && out.code === 'flood' && overMinute(ws.data.strikes ??= { at: Date.now(), n: 0 }, WS_LIMITS.strikes, Date.now())) ws.close(4008, 'flood');
+      if (out.op === 'err' && out.code === 'flood' && overMinute(ws.data.strikes ??= { at: Date.now(), n: 0 }, WS_LIMITS.strikes, Date.now())) { wsCloses.inc({ reason: 'flood' }); ws.close(4008, 'flood'); }
     }
+    wsFrames.inc({ op: frame.op, result });
   };
   const server = Bun.serve<WsData>({
     port: opts.port,
-    fetch: async (req, server) => withCookie(req, await (async () => {
-      await initPeerKeys();   // секрет ключей доступа к людям (один раз; дальше — готовое обещание). WebSocket приходит сюда же (upgrade)
+    fetch: async (req, server) => {
+      const ctx = requestCtx(req);
       const url = new URL(req.url);
+      const res = withCookie(req, await (async () => {
+      await initPeerKeys();   // секрет ключей доступа к людям (один раз; дальше — готовое обещание). WebSocket приходит сюда же (upgrade)
       try {
         if (url.pathname === '/health') return Response.json({ ok: true });
+        if (url.pathname === '/ready') return await readyResponse();   // Postgres, Valkey, KMS (obs/ready.ts)
+        // отчёты клиентов об ошибках и путях звонков: и до входа (ошибка на экране входа) — лимит по IP (obs/clientReports.ts)
+        if (req.method === 'POST' && (url.pathname === '/client-errors' || url.pathname === '/client-stats')) return await clientReport(req, url.pathname, server, ctx);
         // файлы стикеров и реакций публичные (без сессии); nginx отдаёт их сам, сюда доходят, если его нет
         if (url.pathname.startsWith('/stk/')) return await serveStickerFile(url.pathname, req.method);
         if (url.pathname.startsWith('/rx/')) return await serveReactionFile(url.pathname, req.method);
@@ -186,6 +208,7 @@ export function createServer(opts: { port: number }): Server {
         if (auth === 'refresh') return Response.json({ code: 'access_expired' }, { status: 401, headers: { 'x-relay-auth': 'refresh' } });
         if (!auth) return fail('unauthorized');
         const { userId, sessionId } = auth;
+        ctx.userId = userId;
         const priv = await privateAuthRoute(req, url, auth);
         if (priv) return priv;
         const grp = await groupRoute(req, url, userId);
@@ -557,10 +580,13 @@ export function createServer(opts: { port: number }): Server {
         return new Response('Not found', { status: 404 });
       } catch (err) {
         if (err instanceof DomainError) return fail(err.code, err.retryAfter);
-        console.error(`${req.method} ${url.pathname}:`, err);   // неожиданная ошибка: клиенту — internal, причина — сюда
+        // неожиданная ошибка: клиенту — internal, причина — в лог (с id запроса: его видно в ответе, x-request-id)
+        log.error('http handler failed', { reqId: ctx.reqId, userId: ctx.userId, method: req.method, route: routeGroup(url.pathname), path: logPath(url.pathname), error: err });
         return fail('internal');
       }
-    })()),
+      })());
+      return finishRequest(req, url, ctx, res);
+    },
     websocket: {
       maxPayloadLength: WS_MAX_FRAME,   // больше — Bun закрывает сокет сам (по умолчанию было 16 МБ)
       open(ws) {
@@ -596,20 +622,20 @@ export function createServer(opts: { port: number }): Server {
         // больше WS_RATE кадров в секунду — не клиент, а поток: закрываем (клиент переподключится с паузой) — DOS-1
         const now = Date.now(), rate = (ws.data.rate ??= { at: now, n: 0 });
         if (now - rate.at >= 1000) { rate.at = now; rate.n = 0; }
-        if (++rate.n > WS_RATE) { ws.close(4008, 'too many frames'); return; }
-        if (overMinute(ws.data.rateMin ??= { at: now, n: 0 }, WS_LIMITS.perMinute, now)) { ws.close(4008, 'too many frames'); return; }
+        if (++rate.n > WS_RATE) { wsFrames.inc({ op: 'any', result: 'flood' }); wsCloses.inc({ reason: 'flood' }); ws.close(4008, 'too many frames'); return; }
+        if (overMinute(ws.data.rateMin ??= { at: now, n: 0 }, WS_LIMITS.perMinute, now)) { wsFrames.inc({ op: 'any', result: 'flood' }); wsCloses.inc({ reason: 'flood' }); ws.close(4008, 'too many frames'); return; }
         const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
         if (ws.data.challenge && !ws.data.proven) {
           // до подписи ключом устройства выполняется только prove; остальное ждёт (не больше 100 кадров и 256 КБ)
           const f = (() => { try { return JSON.parse(text) as { op?: string; sig?: string }; } catch { return null; } })();
           if (f?.op !== 'prove') {
             ws.data.queuedBytes = (ws.data.queuedBytes ?? 0) + text.length;
-            if (ws.data.queue!.length >= 100 || ws.data.queuedBytes > PRE_PROOF_BYTES) { ws.close(4401, 'device proof required'); return; }
+            if (ws.data.queue!.length >= 100 || ws.data.queuedBytes > PRE_PROOF_BYTES) { wsCloses.inc({ reason: 'proof_queue' }); ws.close(4401, 'device proof required'); return; }
             ws.data.queue!.push(text);
             return;
           }
           const spki = await deviceKeyOf(ws.data.sessionId);
-          if (!spki || !(await verifyDevice(spki, 'ws', ws.data.challenge, f.sig))) { ws.close(4401, 'device proof failed'); return; }
+          if (!spki || !(await verifyDevice(spki, 'ws', ws.data.challenge, f.sig))) { wsCloses.inc({ reason: 'proof_failed' }); ws.close(4401, 'device proof failed'); return; }
           ws.data.proven = true;
           clearTimeout(ws.data.proveTimer);
           activate(ws);

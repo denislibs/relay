@@ -1,0 +1,100 @@
+# Тревоги Relay (vmalert, синтаксис Prometheus). Каждая — в Telegram владельцу (alertmanager); что значит и что
+# делать — annotations.action и docs/observability.md, «Тревоги». Пороги — для одного VPS до ~1000 пользователей.
+groups:
+  - name: relay
+    interval: 30s
+    rules:
+      # 5xx — больше 2 % запросов и хотя бы 3 в минуту (единичная ошибка ночью — не тревога)
+      - alert: RelayHttp5xx
+        expr: |
+          sum by (build) (rate(relay_http_requests_total{status=~"5.."}[5m]))
+            / sum by (build) (rate(relay_http_requests_total[5m])) > 0.02
+          and sum by (build) (rate(relay_http_requests_total{status=~"5.."}[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Сборка {{ $labels.build }}: {{ $value | humanizePercentage }} ответов API — 5xx"
+          action: "Логи: deploy/compose.sh logs --since 15m server | grep '\"level\":\"error\"'. Началось после выката — откатить."
+
+      - alert: RelayS3DiskFull
+        expr: |
+          1 - node_filesystem_avail_bytes{mountpoint="/srv/relay-s3"} / node_filesystem_size_bytes{mountpoint="/srv/relay-s3"} > 0.8
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Раздел вложений /srv/relay-s3 заполнен на {{ $value | humanizePercentage }}"
+          action: "Увеличить раздел или проверить storage.gc в логах воркера; при 95 % загрузки начнут падать."
+
+      - alert: RelayDiskFull
+        expr: |
+          1 - node_filesystem_avail_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/", fstype!~"tmpfs|overlay"} > 0.8
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Системный диск заполнен на {{ $value | humanizePercentage }}"
+          action: "docker system df; старые образы — docker image prune -a; логи контейнеров; WAL Postgres."
+
+      # сервис ключей не готов — почти всегда OpenBao запечатан (перезапуск хоста или контейнера): шифрование стоит
+      - alert: RelayKmsNotReady
+        expr: min by (job) (relay_dependency_up{dep="kms"}) == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "KMS не готов ({{ $labels.job }}): OpenBao запечатан или сервис ключей недоступен"
+          action: "deploy/bao-unseal.sh (ключи распечатывания — у владельца); затем curl /ready."
+
+      - alert: RelayDependencyDown
+        expr: min by (job, dep) (relay_dependency_up{dep=~"postgres|valkey"}) == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }}: нет связи с {{ $labels.dep }}"
+          action: "deploy/compose.sh ps; логи {{ $labels.dep }}; место на диске и память хоста."
+
+      - alert: RelayTargetDown
+        expr: up{job=~"server|worker"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "{{ $labels.job }} ({{ $labels.instance }}) не отвечает на /metrics"
+          action: "deploy/compose.sh ps и logs {{ $labels.job }}; упал при старте — откатить сборку."
+
+      # задача ушла в jobs_dead (исчерпала попытки или постоянная ошибка) — что-то не доделано
+      - alert: RelayJobsDead
+        expr: sum by (kind) (increase(relay_jobs_processed_total{result="dead"}[15m])) > 0
+        labels: { severity: warning }
+        annotations:
+          summary: "Задачи {{ $labels.kind }} не выполнены окончательно: {{ $value | humanize }} за 15 мин"
+          action: "select kind, last_error, failed_at from jobs_dead order by failed_at desc limit 20;"
+
+      - alert: RelayJobsRetrying
+        expr: sum by (kind) (rate(relay_jobs_processed_total{result="retry"}[10m])) > 0.2
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Задачи {{ $labels.kind }} падают и повторяются ({{ $value | humanize }}/с)"
+          action: "Логи воркера: grep 'job failed'. Частая причина — недоступен S3, Meilisearch или Telegram."
+
+      - alert: RelayJobsStuck
+        expr: max by (kind) (relay_jobs_lag_seconds) > 600
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Очередь {{ $labels.kind }}: самая старая задача ждёт {{ $value | humanizeDuration }}"
+          action: "Воркер жив? deploy/compose.sh ps worker; не забит ли пул (видео/фото)."
+
+      # коды входа не уходят — люди не могут войти
+      - alert: RelayTelegramDeliveryFailed
+        expr: sum (increase(relay_code_deliveries_total{result=~"failed|capped"}[15m])) > 0
+        labels: { severity: critical }
+        annotations:
+          summary: "Коды входа не доставлены через Telegram: {{ $value | humanize }} за 15 мин"
+          action: "Логи воркера: grep 'code delivery'. capped — дневной предел TELEGRAM_DAILY_CAP; failed — токен бота, бот заблокирован, сеть."
+
+      - alert: RelayHostMemoryLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Свободной памяти на хосте {{ $value | humanizePercentage }}"
+          action: "Память по контейнерам — панель «Память»; первыми растут worker (ffmpeg) и postgres."

@@ -2,6 +2,9 @@
 # Медиа приходит уже зашифрованным на устройствах (E2EE кадров): ключей у LiveKit нет. Комнаты создаёт и пускает
 # в них только сервер Relay (пропуск — JWT с ключом из LIVEKIT_KEYS); ключи и внешний адрес — флагами из docker-compose.
 port: 7880
+# метрики Prometheus (комнаты, участники, пакеты) — только во внутренней сети compose, порт не публикуется;
+# их опрашивает профиль observability (deploy/docker-compose.observability.yml)
+prometheus_port: 6789
 rtc:
   tcp_port: 7881
   port_range_start: 50000
