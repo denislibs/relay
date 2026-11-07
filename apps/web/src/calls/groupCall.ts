@@ -4,7 +4,7 @@ import { asset } from '../assets';
 import { getGlobal, setGlobal } from '../global';
 import { getPrefs, setPref } from '../prefs';
 import { ephemeral, type Ephemeral } from './callCrypto';
-import { membersEmoji, openSenderKey, sealSenderKey, senderKey } from './groupCrypto';
+import { dataEpoch, membersEmoji, openData, openSenderKey, sealData, sealSenderKey, senderKey } from './groupCrypto';
 import { audioConstraints, failureOf, videoConstraints } from './media';
 import { blurProcessor } from './background';
 import type { NetLevel } from './quality';
@@ -33,7 +33,17 @@ export interface GroupCallView {
   startedBy: number | null;
   reason: 'left' | 'ended' | 'kicked' | 'failed' | 'no_mic' | 'busy' | null;
   rev: number;   // дорожки поменялись — перерисовать видео
+  joinMuted: boolean;                 // админ: новые участники — без микрофона
+  reactions: GroupReaction[];         // летящие реакции (живут REACTION_MS)
+  chat: GroupChatLine[];              // чат звонка: только пока идёт звонок, не сохраняется
+  chatUnread: number;
 }
+export type GroupReaction = { id: number; identity: string; emoji: string };
+export type GroupChatLine = { id: number; userId: number; identity: string; text: string; at: number; me: boolean };
+
+/** Реакции звонка — короткий набор (как в Telegram), чужие эмодзи не показываем. */
+export const CALL_REACTIONS = ['👍', '❤️', '😂', '😮', '👏', '🎉'];
+export const CALL_CHAT_MAX = 500;   // знаков в сообщении
 
 type Send = (frame: Record<string, unknown> & { op: string }) => Promise<unknown>;
 
@@ -52,9 +62,14 @@ interface Active {
   releaseLock: (() => void) | null;
   ended: boolean;
   audios: Map<string, HTMLMediaElement>;
+  raw: Map<string, Map<number, Uint8Array>>;   // ключи отправителей по эпохам (идентичность → эпоха → ключ): расшифровка сообщений канала
+  sentAt: number[];                            // свои реакции и сообщения за последнюю секунду (предел частоты)
 }
 
 const KEYRING = 16;
+const REACTION_MS = 2600;
+const QUIET_FROM = 10;   // больше участников — звуки входа и выхода молчат
+let seq = 0;
 const SWITCH_MS = 400;   // свой новый ключ — в дело чуть позже раздачи: у получателей он уже есть, кадры не теряются
 
 let send: Send = async () => { throw new Error('group calls not started'); };
@@ -125,8 +140,9 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
     videoCaptureDefaults: { resolution: lk.VideoPresets.h720.resolution },
   });
   const a: Active = {
-    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0 },
+    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0, joinMuted: false, reactions: [], chat: [], chatUnread: 0 },
     mine, session, identity: j.identity, lk, room, keys, myKeys: new Map(), sent: new Set(), pending: new Map(), ping: null, releaseLock: release, ended: false, audios: new Map(),
+    raw: new Map(), sentAt: [],
   };
   cur = a;
   const early = joining?.callId === callId ? joining.early : [];
@@ -142,7 +158,9 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
     await room.setE2EEEnabled(true);
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/livekit';
     await room.connect(url, j.token, { autoSubscribe: true });
-    await room.localParticipant.setMicrophoneEnabled(true);
+    // вошёл заглушённым (правило «новые участники без микрофона») — микрофон не публикуем, пока админ не разрешит
+    await room.localParticipant.setMicrophoneEnabled(!a.view.mutedByAdmin);
+    if (a.view.mutedByAdmin) view({ mic: false });
   } catch (e) {
     console.warn('livekit connect:', e);
     toast('Не удалось подключиться к звонку');
@@ -169,7 +187,11 @@ export async function endGroupCallForAll(): Promise<void> {
 export async function toggleGroupMic(): Promise<void> {
   const a = cur;
   if (!a) return;
-  if (a.view.mutedByAdmin && !a.view.mic) { toast('Администратор выключил вам микрофон — поднимите руку, чтобы попросить слово'); return; }
+  if (a.view.mutedByAdmin && !a.view.mic) {
+    const onJoin = a.view.members.find((m) => m.me)?.mutedOnJoin;
+    toast(onJoin ? 'В этом звонке новые участники входят без микрофона — поднимите руку, чтобы попросить слово' : 'Администратор выключил вам микрофон — поднимите руку, чтобы попросить слово');
+    return;
+  }
   const on = !a.view.mic;
   await a.room.localParticipant.setMicrophoneEnabled(on);
   view({ mic: on });
@@ -231,10 +253,10 @@ export function toggleGroupHand(): void {
 }
 
 /** Админ: выключить микрофон / удалить из звонка. */
-export async function adminGroupAction(kind: 'mute' | 'kick', userId: number): Promise<void> {
+export async function adminGroupAction(kind: 'mute' | 'kick' | 'allow', userId: number): Promise<void> {
   const a = cur;
   if (!a) return;
-  try { await send({ op: kind === 'mute' ? 'groupCallMute' : 'groupCallKick', callId: a.view.callId, userId }); }
+  try { await send({ op: kind === 'mute' ? 'groupCallMute' : kind === 'allow' ? 'groupCallAllow' : 'groupCallKick', callId: a.view.callId, userId }); }
   catch { toast('Нужно право «Управление звонками»'); }
 }
 
@@ -280,6 +302,7 @@ function wireRoom(a: Active): void {
     const level = lkLevel(String(q));
     view({ members: a.view.members.map((m) => (m.identity === p.identity ? { ...m, net: level } : m)) });
   });
+  a.room.on(E.DataReceived, (payload, participant, _kind, topic) => { if (topic === DATA_TOPIC && participant) void onData(a, participant.identity, payload); });
   a.room.on(E.Reconnecting, () => view({ phase: 'reconnecting' }));
   a.room.on(E.Reconnected, () => view({ phase: 'active' }));
   a.room.on(E.Disconnected, () => { if (!a.ended) finish(a, 'failed'); });
@@ -292,7 +315,7 @@ async function onEvent(f: CallEvent): Promise<void> {
   if (!a && joining && 'callId' in f && f.callId === joining.callId) { if (joining.early.length < 64) joining.early.push(f); return; }
   if (!a || a.ended || !('callId' in f) || f.callId !== a.view.callId) return;
   switch (f.op) {
-    case 'groupCallState': return onState(a, f.epoch, f.members);
+    case 'groupCallState': view({ joinMuted: f.joinMuted === true }); return onState(a, f.epoch, f.members);
     case 'groupCallKeys': return onKeys(a, f);
     case 'groupCallEnded': return finish(a, 'ended');
     case 'groupCallMuted':
@@ -302,6 +325,77 @@ async function onEvent(f: CallEvent): Promise<void> {
       return;
     case 'groupCallKicked': toast('Администратор удалил вас из звонка'); return finish(a, 'kicked');
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Реакции и чат звонка: канал данных LiveKit, шифр — ключом отправителя эпохи (groupCrypto.sealData)
+
+const DATA_TOPIC = 'relay';
+
+/** Не чаще 5 реакций или сообщений в секунду (своих). */
+function allowSend(a: Active): boolean {
+  const now = Date.now();
+  a.sentAt = a.sentAt.filter((t) => now - t < 1000);
+  if (a.sentAt.length >= 5) return false;
+  a.sentAt.push(now);
+  return true;
+}
+
+async function publish(a: Active, msg: { t: 'r'; e: string } | { t: 'm'; x: string }): Promise<boolean> {
+  const epoch = a.view.epoch, key = a.myKeys.get(epoch);
+  if (!key || a.view.phase !== 'active') return false;
+  const box = await sealData(key, { callId: a.view.callId, epoch, identity: a.identity }, msg);
+  await a.room.localParticipant.publishData(box, { reliable: true, topic: DATA_TOPIC });
+  return true;
+}
+
+function showReaction(a: Active, identity: string, emoji: string): void {
+  const id = ++seq;
+  view({ reactions: [...a.view.reactions.slice(-20), { id, identity, emoji }] });
+  setTimeout(() => { if (cur === a) view({ reactions: a.view.reactions.filter((r) => r.id !== id) }); }, REACTION_MS);
+}
+
+function addLine(a: Active, line: Omit<GroupChatLine, 'id'>, unread: boolean): void {
+  view({ chat: [...a.view.chat.slice(-199), { ...line, id: ++seq }], chatUnread: a.view.chatUnread + (unread ? 1 : 0) });
+}
+
+/** Реакция всем в звонке (и себе над своей плиткой). */
+export async function sendCallReaction(emoji: string): Promise<void> {
+  const a = cur;
+  if (!a || !CALL_REACTIONS.includes(emoji) || !allowSend(a)) return;
+  showReaction(a, a.identity, emoji);
+  await publish(a, { t: 'r', e: emoji }).catch((e) => console.warn('call reaction:', e));
+}
+
+/** Сообщение в чат звонка. false — не ушло (нет ключа ещё или слишком часто). */
+export async function sendCallChat(text: string): Promise<boolean> {
+  const a = cur;
+  const x = text.trim().slice(0, CALL_CHAT_MAX);
+  if (!a || !x || !allowSend(a)) return false;
+  const ok = await publish(a, { t: 'm', x }).catch(() => false);
+  if (ok) addLine(a, { userId: me, identity: a.identity, text: x, at: Date.now(), me: true }, false);
+  return ok;
+}
+
+export function readCallChat(): void { if (cur && cur.view.chatUnread) view({ chatUnread: 0 }); }
+
+async function onData(a: Active, identity: string, payload: Uint8Array): Promise<void> {
+  const sender = a.view.members.find((m) => m.identity === identity);
+  const epoch = dataEpoch(payload);
+  const key = epoch == null ? undefined : a.raw.get(identity)?.get(epoch);
+  if (!sender || !key) return;   // ключа этой эпохи нет (вошёл только что) — сообщение мимо
+  const msg = await openData(key, { callId: a.view.callId, identity }, payload) as { t?: string; e?: string; x?: string } | null;
+  if (!msg || cur !== a) return;
+  if (msg.t === 'r' && typeof msg.e === 'string' && CALL_REACTIONS.includes(msg.e)) showReaction(a, identity, msg.e);
+  else if (msg.t === 'm' && typeof msg.x === 'string' && msg.x.trim()) addLine(a, { userId: sender.userId, identity, text: msg.x.slice(0, CALL_CHAT_MAX), at: Date.now(), me: false }, true);
+}
+
+/** Админ: новые участники входят без микрофона. */
+export async function setJoinMuted(on: boolean): Promise<void> {
+  const a = cur;
+  if (!a) return;
+  try { await send({ op: 'groupCallSettings', callId: a.view.callId, joinMuted: on }); }
+  catch { toast('Не удалось изменить настройку звонка'); }
 }
 
 /** ConnectionQuality LiveKit → наш уровень 0–3 (calls/quality.ts). */
@@ -316,7 +410,16 @@ async function onState(a: Active, epoch: number, members: GroupCallMember[]): Pr
     return { ...m, identity, me: m.session === a.session, speaking: speaking.has(identity), net: net.get(identity) ?? 3 };
   });
   const mine = list.find((m) => m.me);
-  view({ members: list, epoch, mutedByAdmin: !!mine?.mutedByAdmin, emoji: await membersEmoji(a.view.callId, members) });
+  // звуки входа и выхода — не на первом составе и не в больших звонках
+  if (a.view.members.length && list.length <= QUIET_FROM) {
+    const was = new Set(a.view.members.map((m) => m.identity)), now = new Set(list.map((m) => m.identity));
+    const vol = getPrefs().calls.volume;
+    if (list.some((m) => !m.me && !was.has(m.identity))) sounds.groupJoin(vol);
+    else if (a.view.members.some((m) => !m.me && !now.has(m.identity))) sounds.groupLeave(vol);
+  }
+  if (a.view.mutedByAdmin && mine && !mine.mutedByAdmin) { toast('Вам снова можно говорить'); view({ hand: false }); }   // слово дали — рука опущена
+  if (mine?.mutedByAdmin && a.view.mic && a.view.phase !== 'joining') { await a.room.localParticipant.setMicrophoneEnabled(false); view({ mic: false }); }
+  view({ members: list, epoch, mutedByAdmin: !!mine?.mutedByAdmin, ...(mine?.mutedByAdmin ? { mic: false } : {}), emoji: await membersEmoji(a.view.callId, members) });
   // ключи, пришедшие раньше состава (отправитель ещё не был известен)
   for (const [id, waiting] of a.pending) { a.pending.delete(id); for (const k of waiting) await onKeys(a, k); }
   if (!a.sent.has(epoch)) await rekey(a, epoch);
@@ -349,6 +452,10 @@ async function onKeys(a: Active, f: { epoch: number; from: number; userId: numbe
   const key = await openSenderKey({ mine: a.mine, theirPub: sender.pub, callId: a.view.callId, epoch: f.epoch, from: f.from, to: a.session, data: f.data });
   if (!key) return;
   await a.keys.set(sender.identity, key, f.epoch % KEYRING);
+  const byEpoch = a.raw.get(sender.identity) ?? new Map<number, Uint8Array>();
+  byEpoch.set(f.epoch, key);
+  for (const e of [...byEpoch.keys()]) if (e < f.epoch - 2) byEpoch.delete(e);
+  a.raw.set(sender.identity, byEpoch);
 }
 
 /** Сокет переподключился: сервер мог нас забыть — войти снова той же сессией (эпоха вырастет, ключи разойдутся заново). */

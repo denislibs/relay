@@ -71,11 +71,11 @@ async function members(id: string): Promise<Member[]> {
   return vals.map((v) => JSON.parse(v) as Member).sort((a, b) => a.joinedAt - b.joinedAt);
 }
 
-async function meta(id: string): Promise<{ chatId: number; epoch: number; startedBy: number; startedAt: number } | null> {
+async function meta(id: string): Promise<{ chatId: number; epoch: number; startedBy: number; startedAt: number; joinMuted: boolean } | null> {
   const flat = (await valkey().send('HGETALL', [callKey(id)])) as string[] | Record<string, string> | null;
   const h: Record<string, string> = Array.isArray(flat) ? Object.fromEntries(flat.flatMap((v, i, a) => (i % 2 ? [] : [[v, a[i + 1]]]))) : (flat ?? {});
   if (!h.chatId) return null;
-  return { chatId: Number(h.chatId), epoch: Number(h.epoch ?? 0), startedBy: Number(h.startedBy), startedAt: Number(h.startedAt) };
+  return { chatId: Number(h.chatId), epoch: Number(h.epoch ?? 0), startedBy: Number(h.startedBy), startedAt: Number(h.startedAt), joinMuted: h.joinMuted === '1' };
 }
 
 const pub = (m: Member): GroupCallMember => { const { at: _, ...rest } = m; return rest; };
@@ -83,7 +83,8 @@ const pub = (m: Member): GroupCallMember => { const { at: _, ...rest } = m; retu
 /** Состав и эпоха — всем, кто в звонке (их сессиям). */
 async function broadcast(publish: Publish, id: string, chatId: number, epoch: number, list?: Member[]): Promise<void> {
   const ms = list ?? await members(id);
-  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub) };
+  const joinMuted = (await valkey().send('HGET', [callKey(id), 'joinMuted'])) === '1';
+  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub), ...(joinMuted ? { joinMuted } : {}) };
   for (const m of ms) send(publish, `session:${m.session}`, f);
 }
 
@@ -147,16 +148,18 @@ export async function startGroupCall(userId: number, chatId: number): Promise<{ 
 export async function joinGroupCall(publish: Publish, userId: number, sessionId: number, f: { callId: string; pub: string; muted: boolean; video: boolean }): Promise<{ token: string; identity: string; epoch: number; chatId: number }> {
   const m = await meta(f.callId);
   if (!m) throw new DomainError('not_found', 'call');
-  await groupCtx(sql, m.chatId, userId);
+  const ctx = await groupCtx(sql, m.chatId, userId);
   const ms = await members(f.callId);
   if (!ms.some((x) => x.session === sessionId) && ms.length >= GROUP_CALL_MEMBERS_MAX) throw new DomainError('forbidden', 'full');
   const prev = ms.find((x) => x.session === sessionId);
-  const member: Member = { userId, session: sessionId, pub: f.pub, muted: f.muted, video: f.video, screen: false, hand: null, joinedAt: prev?.joinedAt ?? Date.now(), at: Date.now() };
+  // «новые участники без микрофона» (админ включил): входит заглушённым, кроме админов звонка; повторный вход — как был
+  const gag = prev ? { mutedByAdmin: prev.mutedByAdmin, mutedOnJoin: prev.mutedOnJoin } : m.joinMuted && !hasAdmin(ctx, 'calls') ? { mutedByAdmin: true, mutedOnJoin: true } : {};
+  const member: Member = { userId, session: sessionId, pub: f.pub, muted: gag.mutedByAdmin ? true : f.muted, video: f.video, screen: false, hand: null, joinedAt: prev?.joinedAt ?? Date.now(), at: Date.now(), ...gag };
   await valkey().send('HSET', [membersKey(f.callId), String(sessionId), JSON.stringify(member)]);
   await valkey().send('EXPIRE', [membersKey(f.callId), String(TTL)]);
   const epoch = Number(await valkey().send('HINCRBY', [callKey(f.callId), 'epoch', '1']));
   const identity = identityOf(userId, sessionId);
-  const token = liveKitToken({ room: f.callId, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: false, canUpdateOwnMetadata: false }, identity, 600, { name: String(userId) });
+  const token = liveKitToken({ room: f.callId, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true, canUpdateOwnMetadata: false }, identity, 600, { name: String(userId) });
   await broadcast(publish, f.callId, m.chatId, epoch);
   await summarize(m.chatId, f.callId);
   return { token, identity, epoch, chatId: m.chatId };
@@ -223,9 +226,23 @@ export async function muteGroupMember(publish: Publish, userId: number, f: { cal
   const { m } = await adminCtx(userId, f.callId);
   for (const x of await members(f.callId)) {
     if (x.userId !== f.userId) continue;
-    const next: Member = { ...x, muted: true, mutedByAdmin: true, hand: null };
+    const next: Member = { ...x, muted: true, mutedByAdmin: true, mutedOnJoin: undefined, hand: null };   // лично — правило входа уже ни при чём
     await valkey().send('HSET', [membersKey(f.callId), String(x.session), JSON.stringify(next)]);
     send(publish, `session:${x.session}`, { op: 'groupCallMuted', callId: f.callId, by: userId });
+  }
+  await broadcast(publish, f.callId, m.chatId, m.epoch);
+  return { ok: true };
+}
+
+/** Настройки звонка (админ): «новые участники без микрофона». Выключили — заглушённые этим правилом снова могут говорить. */
+export async function setGroupCallSettings(publish: Publish, userId: number, f: { callId: string; joinMuted: boolean }): Promise<{ ok: true }> {
+  const { m } = await adminCtx(userId, f.callId);
+  await valkey().send('HSET', [callKey(f.callId), 'joinMuted', f.joinMuted ? '1' : '0']);
+  if (!f.joinMuted) {
+    for (const x of await members(f.callId)) {
+      if (!x.mutedOnJoin) continue;
+      await valkey().send('HSET', [membersKey(f.callId), String(x.session), JSON.stringify({ ...x, mutedByAdmin: false, mutedOnJoin: undefined })]);
+    }
   }
   await broadcast(publish, f.callId, m.chatId, m.epoch);
   return { ok: true };
@@ -236,7 +253,7 @@ export async function allowGroupMember(publish: Publish, userId: number, f: { ca
   const { m } = await adminCtx(userId, f.callId);
   for (const x of await members(f.callId)) {
     if (x.userId !== f.userId || !x.mutedByAdmin) continue;
-    await valkey().send('HSET', [membersKey(f.callId), String(x.session), JSON.stringify({ ...x, mutedByAdmin: false, hand: null })]);
+    await valkey().send('HSET', [membersKey(f.callId), String(x.session), JSON.stringify({ ...x, mutedByAdmin: false, mutedOnJoin: undefined, hand: null })]);
   }
   await broadcast(publish, f.callId, m.chatId, m.epoch);
 }

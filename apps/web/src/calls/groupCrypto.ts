@@ -63,3 +63,37 @@ export async function membersEmoji(callId: string, members: { session: number; p
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('relay-gcall-emoji|' + callId + '\n' + list)));
   return [0, 1, 2, 3].map((i) => EMOJI[h[i] % EMOJI.length] + '️');
 }
+
+/**
+ * Реакции и чат звонка — каналом данных LiveKit, шифром на ключе отправителя текущей эпохи (тот же, что у кадров, но
+ * через HKDF со своей меткой: ключ кадров и ключ сообщений не совпадают). SFU видит только шифротекст и размер.
+ * AAD — звонок, эпоха и идентичность отправителя: чужое сообщение не выдать за своё и не переиграть в другой эпохе.
+ */
+async function dataKey(raw: Uint8Array, aad: string): Promise<CryptoKey> {
+  const ikm = await crypto.subtle.importKey('raw', raw as BufferSource, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: enc.encode('relay-gcall-data-v1'), info: enc.encode(aad) }, ikm, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+const dataAad = (callId: string, epoch: number, identity: string) => `${callId}|${epoch}|${identity}`;
+
+export async function sealData(raw: Uint8Array, p: { callId: string; epoch: number; identity: string }, msg: unknown): Promise<Uint8Array> {
+  const aad = dataAad(p.callId, p.epoch, p.identity);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: enc.encode(aad) }, await dataKey(raw, aad), enc.encode(JSON.stringify(msg))));
+  return enc.encode(JSON.stringify({ v: 1, e: p.epoch, n: toB64u(iv), c: toB64u(ct) }));
+}
+
+/** Эпоха конверта (какой ключ отправителя брать) — до расшифровки; null — не наш конверт. */
+export function dataEpoch(bytes: Uint8Array): number | null {
+  try { const o = JSON.parse(new TextDecoder().decode(bytes)) as { v?: number; e?: unknown }; return o.v === 1 && Number.isInteger(o.e) ? (o.e as number) : null; } catch { return null; }
+}
+
+export async function openData(raw: Uint8Array, p: { callId: string; identity: string }, bytes: Uint8Array): Promise<unknown | null> {
+  try {
+    const o = JSON.parse(new TextDecoder().decode(bytes)) as { v: number; e: number; n: string; c: string };
+    const iv = fromB64u(o.n), ct = fromB64u(o.c);
+    if (o.v !== 1 || !iv || !ct || iv.length !== 12) return null;
+    const aad = dataAad(p.callId, o.e, p.identity);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: iv as BufferSource, additionalData: enc.encode(aad) }, await dataKey(raw, aad), ct as BufferSource);
+    return JSON.parse(new TextDecoder().decode(plain));
+  } catch { return null; }
+}

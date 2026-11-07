@@ -2,8 +2,8 @@ import type { GroupCallSummary, ProfilePhoto } from '@relay/protocol';
 import { Avatar, Icon, peerTone, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  adminGroupAction, endGroupCallForAll, groupTracks, joinGroupCall, leaveGroupCall, setGroupBackground, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
-  type GroupCallView, type GroupMemberView,
+  adminGroupAction, CALL_CHAT_MAX, CALL_REACTIONS, endGroupCallForAll, readCallChat, sendCallChat, sendCallReaction, setJoinMuted, groupTracks, joinGroupCall, leaveGroupCall, setGroupBackground, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
+  type GroupCallView, type GroupMemberView, type GroupReaction,
 } from '../../calls/groupCall';
 import { callClock } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
@@ -99,6 +99,8 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
   const meId = useGlobal((s) => s.me?.userId ?? 0);
   const admin = !!(chat?.me as { admin?: { calls?: boolean } } | null)?.admin?.calls;
   const [list, setList] = useState(true);
+  const [side, setSide] = useState<'list' | 'chat'>('list');   // правая панель: участники или чат звонка
+  const [reacting, setReacting] = useState(false);
   const [pinned, setPinned] = useState<string | null>(null);
   const [hint, setHint] = useState(false);
   const bg = useGlobal((s) => s.prefs.calls.background);
@@ -130,14 +132,25 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
       {v.phase === 'active' && (v.members.find((m) => m.me)?.net ?? 3) <= 1 ? <span class="app-call-note app-call-net app-gcall-badnet"><Icon name="signal" size={16} /> Плохое соединение</span> : null}
       <div class={'app-gcall-body' + (list ? ' with-list' : '')}>
         <div class="app-gcall-grid" style={{ '--cols': cols }}>
-          {tiles.map((m) => <Tile key={m.identity} m={m} rev={v.rev} pinned={pinned === m.identity} onPin={() => setPinned((p) => (p === m.identity ? null : m.identity))} />)}
+          {tiles.map((m) => <Tile key={m.identity} m={m} rev={v.rev} pinned={pinned === m.identity} reactions={v.reactions.filter((r) => r.identity === m.identity)} onPin={() => setPinned((p) => (p === m.identity ? null : m.identity))} />)}
         </div>
-        {list ? (
+        {list && side === 'chat' ? <CallChat v={v} /> : list ? (
           <div class="app-gcall-list" aria-label="Участники">
+            {admin ? (
+              <label class="app-gcall-setting">
+                <input type="checkbox" checked={v.joinMuted} onChange={(e) => void setJoinMuted((e.target as HTMLInputElement).checked)} />
+                <span>Новые участники — без микрофона</span>
+              </label>
+            ) : null}
             {[...v.members].sort((a, b) => (b.hand ?? 0) - (a.hand ?? 0)).map((m) => <Row key={m.identity} m={m} admin={admin && m.userId !== meId} />)}
           </div>
         ) : null}
       </div>
+      {reacting ? (
+        <div class="app-gcall-reactbar" role="toolbar" aria-label="Реакции">
+          {CALL_REACTIONS.map((e) => <button key={e} type="button" aria-label={'Реакция ' + e} onClick={() => void sendCallReaction(e)}>{e}</button>)}
+        </div>
+      ) : null}
       <div class="app-call-controls">
         {v.cam ? <Btn icon="blur" label={bg === 'blur' ? 'Обычный фон' : 'Размыть фон'} on={bg === 'blur'} onClick={() => void setGroupBackground(bg === 'blur' ? 'none' : 'blur')} /> : null}
         <Btn icon={v.cam ? 'video' : 'videoOff'} label={v.cam ? 'Камера' : 'Камера выкл.'} on={v.cam} onClick={() => void toggleGroupCam()} />
@@ -145,6 +158,8 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
         {typeof navigator !== 'undefined' && navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices
           ? <Btn icon="screen" label={v.screen ? 'Остановить показ' : 'Экран'} on={v.screen} onClick={() => void toggleGroupScreen()} /> : null}
         <Btn icon="raiseHand" label={v.hand ? 'Опустить руку' : 'Поднять руку'} on={v.hand} onClick={toggleGroupHand} />
+        <Btn icon="smile" label="Реакция" on={reacting} onClick={() => setReacting((x) => !x)} />
+        <Btn icon="chats" label="Чат" on={list && side === 'chat'} badge={v.chatUnread} onClick={() => { const open = !(list && side === 'chat'); setSide(open ? 'chat' : 'list'); if (open) { setList(true); readCallChat(); } }} />
         <Btn icon="phoneDown" label="Выйти" danger onClick={leaveGroupCall} />
         {admin || v.startedBy === meId ? <Btn icon="close" label="Завершить для всех" danger onClick={() => void endGroupCallForAll()} /> : null}
       </div>
@@ -152,11 +167,12 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
   );
 }
 
-function Btn({ icon, label, onClick, on, danger }: { icon: string; label: string; onClick: () => void; on?: boolean; danger?: boolean }) {
+function Btn({ icon, label, onClick, on, danger, badge }: { icon: string; label: string; onClick: () => void; on?: boolean; danger?: boolean; badge?: number }) {
   return (
     <div class="app-call-btn">
-      <button type="button" class={'app-call-round' + (danger ? ' is-danger' : on === false ? ' is-off' : '')} aria-label={label} aria-pressed={on} onPointerDown={ripple} onClick={onClick}>
+      <button type="button" class={'app-call-round' + (danger ? ' is-danger' : on === false ? ' is-off' : '')} aria-label={badge ? `${label}, новых: ${badge}` : label} aria-pressed={on} onPointerDown={ripple} onClick={onClick}>
         <Icon name={icon} size={26} />
+        {badge ? <span class="app-call-badge" aria-hidden="true">{badge > 99 ? '99+' : badge}</span> : null}
       </button>
       <span>{label}</span>
     </div>
@@ -164,7 +180,7 @@ function Btn({ icon, label, onClick, on, danger }: { icon: string; label: string
 }
 
 /** Плитка: видео (экран — главнее камеры) или аватар; говорящий — с рамкой. */
-function Tile({ m, rev, pinned, onPin }: { m: GroupMemberView; rev: number; pinned: boolean; onPin: () => void }) {
+function Tile({ m, rev, pinned, onPin, reactions }: { m: GroupMemberView; rev: number; pinned: boolean; onPin: () => void; reactions: GroupReaction[] }) {
   const u = useUser(m.userId);
   const meName = useGlobal((s) => s.me?.name ?? '');
   const real = m.me ? meName : String(u?.name ?? '');   // аватар — по настоящему имени, подпись у своей плитки — «Вы»
@@ -185,6 +201,7 @@ function Tile({ m, rev, pinned, onPin }: { m: GroupMemberView; rev: number; pinn
     <button type="button" class={'app-gtile' + (m.speaking ? ' is-speaking' : '') + (hasVideo ? ' has-video' : '') + (pinned ? ' is-pinned' : '')} onClick={onPin} aria-label={name + (pinned ? ' — открепить' : ' — на весь экран')}>
       <video ref={ref} autoplay playsInline muted class={m.me && !m.screen ? 'is-mirror' : ''} />
       {hasVideo ? null : <Avatar name={real} tone={peerTone(m.userId)} size={88} {...avatarPhoto((u?.photo as ProfilePhoto | null) ?? null)} />}
+      {reactions.length ? <span class="app-gtile-reacts" aria-live="polite">{reactions.map((r) => <span key={r.id} class="app-gtile-react">{r.emoji}</span>)}</span> : null}
       <span class="app-gtile-name">{m.net <= 1 ? <Icon name="signal" size={14} class="app-gtile-net" title="Слабый сигнал" /> : null}{m.muted ? <Icon name="micOff" size={14} /> : null}{m.hand ? <Icon name="raiseHand" size={14} /> : null}{name}</span>
     </button>
   );
@@ -203,10 +220,46 @@ function Row({ m, admin }: { m: GroupMemberView; admin: boolean }) {
       <Icon name={m.hand ? 'raiseHand' : m.muted ? 'micOff' : 'mic'} size={20} />
       {admin ? (
         <span class="app-gcall-row-admin">
-          {!m.mutedByAdmin ? <button type="button" aria-label={`Выключить микрофон: ${name}`} onClick={() => void adminGroupAction('mute', m.userId)}><Icon name="micOff" size={18} /></button> : null}
+          {!m.mutedByAdmin ? <button type="button" aria-label={`Выключить микрофон: ${name}`} onClick={() => void adminGroupAction('mute', m.userId)}><Icon name="micOff" size={18} /></button>
+            : <button type="button" aria-label={`Разрешить говорить: ${name}`} onClick={() => void adminGroupAction('allow', m.userId)}><Icon name="mic" size={18} /></button>}
           <button type="button" aria-label={`Удалить из звонка: ${name}`} onClick={() => void adminGroupAction('kick', m.userId)}><Icon name="userX" size={18} /></button>
         </span>
       ) : null}
+    </div>
+  );
+}
+
+/** Чат звонка: только пока идёт звонок, у вошедших позже прошлого нет; шифр — ключом отправителя (как кадры). */
+function CallChat({ v }: { v: GroupCallView }) {
+  const [text, setText] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { readCallChat(); const el = box.current; if (el) el.scrollTop = el.scrollHeight; }, [v.chat.length]);
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    const value = (box.current?.parentElement?.querySelector('input') as HTMLInputElement | null)?.value ?? text;   // Enter раньше перерисовки — берём из поля
+    if (await sendCallChat(value)) setText('');
+  };
+  return (
+    <div class="app-gcall-chat" aria-label="Чат звонка">
+      <p class="app-gcall-chat-note">Сообщения видят только участники и только пока идёт звонок.</p>
+      <div class="app-gcall-chat-list" ref={box} role="log">
+        {v.chat.map((l) => <ChatLine key={l.id} l={l} />)}
+      </div>
+      <form class="app-gcall-chat-form" onSubmit={(e) => void submit(e)}>
+        <input type="text" value={text} maxLength={CALL_CHAT_MAX} placeholder="Сообщение" aria-label="Сообщение в чат звонка" onInput={(e) => setText((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.isComposing) void submit(e); }} />
+        <button type="submit" aria-label="Отправить" disabled={!text.trim()}><Icon name="send" size={20} /></button>
+      </form>
+    </div>
+  );
+}
+
+function ChatLine({ l }: { l: GroupCallView['chat'][number] }) {
+  const u = useUser(l.me ? null : l.userId);
+  return (
+    <div class={'app-gcall-line' + (l.me ? ' is-me' : '')}>
+      {l.me ? null : <b>{String(u?.name ?? '')}</b>}
+      <span>{l.text}</span>
     </div>
   );
 }

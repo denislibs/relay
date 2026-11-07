@@ -1905,3 +1905,25 @@ span.app-log-ava { cursor: default; }
 .app-call-net { color: #ffd166; }
 .app-gtile-net { color: #ffd166; }
 .app-gcall-badnet { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; }
+
+/* групповой звонок: реакции, чат, настройка «без микрофона» (этап 6) */
+.app-gcall-reactbar { align-self: center; display: flex; gap: 6px; padding: 6px 10px; border-radius: 24px; background: rgba(0,0,0,.35); backdrop-filter: blur(12px); }
+.app-gcall-reactbar button { width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; font-size: 24px; line-height: 40px; cursor: pointer; transition: transform .15s ease; }
+.app-gcall-reactbar button:hover { transform: scale(1.18); background: rgba(255,255,255,.12); }
+.app-gtile-reacts { position: absolute; left: 50%; bottom: 36px; pointer-events: none; }
+.app-gtile-react { position: absolute; left: 0; bottom: 0; font-size: 40px; animation: app-gtile-react 2.6s ease-out forwards; }
+@keyframes app-gtile-react { 0% { transform: translate(-50%, 0) scale(.4); opacity: 0; } 12% { transform: translate(-50%, -10px) scale(1.15); opacity: 1; } 75% { opacity: 1; } 100% { transform: translate(-50%, -120px) scale(1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-gtile-react { animation-duration: 1.2s; animation-name: app-gtile-react-fade; } @keyframes app-gtile-react-fade { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, 0); } } }
+.app-call-round { position: relative; }
+.app-call-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font: 600 11px/18px var(--font-sans); }
+.app-gcall-setting { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border-radius: 12px; background: rgba(255,255,255,.06); font: 400 13px/18px var(--font-sans); cursor: pointer; }
+.app-gcall-chat { min-height: 0; display: flex; flex-direction: column; border-radius: 16px; background: rgba(0,0,0,.2); overflow: hidden; }
+.app-gcall-chat-note { margin: 0; padding: 8px 12px; font: 400 12px/16px var(--font-sans); opacity: .7; }
+.app-gcall-chat-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 10px 8px; }
+.app-gcall-line { align-self: flex-start; max-width: 90%; display: flex; flex-direction: column; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.1); font: 400 14px/19px var(--font-sans); overflow-wrap: anywhere; }
+.app-gcall-line b { font: 600 12px/16px var(--font-sans); opacity: .8; }
+.app-gcall-line.is-me { align-self: flex-end; background: var(--brand); color: #fff; }
+.app-gcall-chat-form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+.app-gcall-chat-form input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: rgba(255,255,255,.12); color: inherit; font: 400 14px/20px var(--font-sans); }
+.app-gcall-chat-form button { width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; cursor: pointer; }
+.app-gcall-chat-form button:disabled { opacity: .4; cursor: default; }

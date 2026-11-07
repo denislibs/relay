@@ -23,6 +23,8 @@ const TONES: Record<string, Tone> = {
   end: { notes: [{ f: [480], at: 0, dur: 0.18 }, { f: [360], at: 0.22, dur: 0.3 }], period: 0.6 },
   connecting: { notes: [{ f: [600], at: 0, dur: 0.1 }], period: 1.2 },
   failed: { notes: [{ f: [520], at: 0, dur: 0.15 }, { f: [390], at: 0.2, dur: 0.15 }, { f: [290], at: 0.4, dur: 0.3 }], period: 0.8 },
+  gjoin: { notes: [{ f: [660], at: 0, dur: 0.09 }, { f: [990], at: 0.1, dur: 0.14 }], period: 0.3 },
+  gleave: { notes: [{ f: [990], at: 0, dur: 0.09 }, { f: [660], at: 0.1, dur: 0.14 }], period: 0.3 },
   test: { notes: [{ f: [440], at: 0, dur: 0.25 }, { f: [554], at: 0.3, dur: 0.25 }, { f: [659], at: 0.6, dur: 0.4 }], period: 1.05 },
   'ring:classic': { notes: [{ f: [660, 880], at: 0, dur: 0.4 }, { f: [660, 880], at: 0.6, dur: 0.4 }], period: 2.5 },
   'ring:chime': { notes: [{ f: [784], at: 0, dur: 0.25 }, { f: [988], at: 0.25, dur: 0.25 }, { f: [1175], at: 0.5, dur: 0.45 }], period: 2.5 },
@@ -32,6 +34,7 @@ const TONES: Record<string, Tone> = {
 /** Звук → файл в /sounds/calls/ (мелодия «Стандартная» — incoming). */
 export const FILES: Record<string, string> = {
   outgoing: 'outgoing', busy: 'busy', connect: 'connect', end: 'end', connecting: 'connecting', failed: 'failed', 'ring:classic': 'incoming',
+  gjoin: 'group_join', gleave: 'group_leave',
 };
 const fileUrl = (name: string) => `/sounds/calls/${FILES[name]}.mp3`;
 
@@ -115,5 +118,7 @@ export const sounds = {
   busy(volume: number): void { play('busy', volume, true, 3000); },
   reconnecting(volume: number): void { play('connecting', volume, true); },
   failed(volume: number): void { play('failed', volume, false); },
+  groupJoin(volume: number): void { play('gjoin', volume, false); },
+  groupLeave(volume: number): void { play('gleave', volume, false); },
   stop(): void { stopNow(); },
 };

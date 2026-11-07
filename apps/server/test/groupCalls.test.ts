@@ -175,3 +175,57 @@ test('LiveKit token is HS256 over header.body with the API secret', () => {
   expect(JSON.parse(Buffer.from(b, 'base64url').toString())).toEqual({ iss: 'k', sub: 'u1-s2', nbf: 990, exp: 1060, video: { room: 'r1', roomJoin: true } });
   expect(createHmac('sha256', 'sec').update(`${h}.${b}`).digest('base64url')).toBe(sig);
 });
+
+test('«new members without mic»: only an admin sets it; newcomers join gagged (not admins), turning it off frees them; data channel allowed in the pass', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const g = await chat(a, 'group', [a.userId, b.userId, c.userId]);
+  await own(g, a.userId);
+  const wa = await connect(a.token), wb = await connect(b.token), wc = await connect(c.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  const ja = await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false }) as { token: string };
+  const grant = JSON.parse(Buffer.from(ja.token.split('.')[1], 'base64url').toString()).video;
+  expect(grant.canPublishData).toBe(true);   // реакции и чат звонка — каналом данных LiveKit (шифрует клиент)
+  await expect(call(wb, { op: 'groupCallSettings', callId, joinMuted: true })).rejects.toThrow('forbidden');
+  const on = state(wa, 1);
+  expect(await call(wa, { op: 'groupCallSettings', callId, joinMuted: true })).toEqual({ ok: true });
+  expect((await on).joinMuted).toBe(true);
+
+  const two = state(wa, 2);
+  await call(wb, { op: 'groupCallJoin', callId, pub: PUB('b'), muted: false, video: false });
+  const st = await two;
+  expect(st.members.find((m) => m.userId === b.userId)).toMatchObject({ muted: true, mutedByAdmin: true, mutedOnJoin: true });
+  expect(st.members.find((m) => m.userId === a.userId)?.mutedByAdmin).toBeUndefined();
+  // заглушённый правилом не включит микрофон сам
+  const upd = state(wa, 2);
+  wb.send(JSON.stringify({ op: 'groupCallUpdate', callId, muted: false, video: false, screen: false, hand: false }));
+  expect((await upd).members.find((m) => m.userId === b.userId)?.muted).toBe(true);
+  // Веру админ заглушил лично — выключение правила её не освобождает
+  const three = state(wa, 3);
+  await call(wc, { op: 'groupCallJoin', callId, pub: PUB('c'), muted: false, video: false });
+  await three;
+  await call(wa, { op: 'groupCallMute', callId, userId: c.userId });
+  const off = nextFrame(wa, (f) => f.op === 'groupCallState' && !f.joinMuted) as Promise<Extract<ServerFrame, { op: 'groupCallState' }>>;
+  await call(wa, { op: 'groupCallSettings', callId, joinMuted: false });
+  const after = await off;
+  expect(after.members.find((m) => m.userId === b.userId)?.mutedByAdmin).toBe(false);
+  expect(after.members.find((m) => m.userId === c.userId)?.mutedByAdmin).toBe(true);
+  wa.close(); wb.close(); wc.close();
+});
+
+test('raised hand → the admin allows speaking; strangers cannot', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const g = await chat(a, 'group', [a.userId, b.userId]);
+  await own(g, a.userId);
+  const wa = await connect(a.token), wb = await connect(b.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  await call(wa, { op: 'groupCallSettings', callId, joinMuted: true });
+  const two = state(wa, 2);
+  await call(wb, { op: 'groupCallJoin', callId, pub: PUB('b'), muted: false, video: false });
+  expect((await two).members.find((m) => m.userId === b.userId)?.mutedByAdmin).toBe(true);
+  await expect(call(wb, { op: 'groupCallAllow', callId, userId: b.userId })).rejects.toThrow('forbidden');
+  const freed = nextFrame(wa, (f) => f.op === 'groupCallState' && f.members.some((m) => m.userId === b.userId && !m.mutedByAdmin)) as Promise<Extract<ServerFrame, { op: 'groupCallState' }>>;
+  expect(await call(wa, { op: 'groupCallAllow', callId, userId: b.userId })).toEqual({ ok: true });
+  expect((await freed).members.find((m) => m.userId === b.userId)?.mutedOnJoin).toBeUndefined();
+  wa.close(); wb.close();
+});

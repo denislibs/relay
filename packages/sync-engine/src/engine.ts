@@ -1387,7 +1387,7 @@ export class Engine {
         // запрос, принятие и «мой звонок» ждут ответа сервера (reqId ставит request), остальное — без ответа
         const f = a.frame;
         if (f.op === 'callRequest' || f.op === 'callAccept' || f.op === 'callGet' || f.op === 'groupCallStart' || f.op === 'groupCallJoin' || f.op === 'groupCallGet'
-          || f.op === 'groupCallEnd' || f.op === 'groupCallMute' || f.op === 'groupCallKick') return this.request({ ...f, reqId: '' });
+          || f.op === 'groupCallEnd' || f.op === 'groupCallMute' || f.op === 'groupCallKick' || f.op === 'groupCallSettings' || f.op === 'groupCallAllow') return this.request({ ...f, reqId: '' });
         this.transport.send(f);
         return null;
       }

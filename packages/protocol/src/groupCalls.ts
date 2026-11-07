@@ -16,7 +16,7 @@ export const GROUP_CALL_MEMBERS_MAX = 200;
 export interface GroupCallSummary { callId: string; count: number; startedAt: number; faces: Id[] }
 
 /** Участник звонка. session — сессия, которая ведёт звонок (ключи адресуются ей); pub — открытый ключ ECDH этой эпохи. */
-export interface GroupCallMember { userId: Id; session: Id; pub: string; muted: boolean; video: boolean; screen: boolean; hand: number | null; joinedAt: number; mutedByAdmin?: boolean }
+export interface GroupCallMember { userId: Id; session: Id; pub: string; muted: boolean; video: boolean; screen: boolean; hand: number | null; joinedAt: number; mutedByAdmin?: boolean; mutedOnJoin?: boolean }   // mutedOnJoin — без микрофона по правилу «новые участники без микрофона»
 
 /** Служебное «X начал(а) звонок» / «Звонок завершён (N мин)». */
 export interface GroupCallServiceData { callId: string; state: 'started' | 'ended'; duration?: number }
@@ -31,10 +31,12 @@ export type GroupCallClientFrame =
   | { op: 'groupCallGet'; reqId: string; chatId: Id }                                     // ack: { call: GroupCallSummary | null }
   | { op: 'groupCallEnd'; reqId: string; callId: string }                                 // завершить для всех: начавший или админ с правом calls
   | { op: 'groupCallMute'; reqId: string; callId: string; userId: Id }                    // админ: выключить микрофон
-  | { op: 'groupCallKick'; reqId: string; callId: string; userId: Id };                   // админ: удалить из звонка
+  | { op: 'groupCallKick'; reqId: string; callId: string; userId: Id }                    // админ: удалить из звонка
+  | { op: 'groupCallSettings'; reqId: string; callId: string; joinMuted: boolean }
+  | { op: 'groupCallAllow'; reqId: string; callId: string; userId: Id };                  // админ: снова можно говорить (после «выключить» или правила входа)       // админ: новые участники — без микрофона
 
 export type GroupCallServerFrame =
-  | { op: 'groupCallState'; callId: string; chatId: Id; epoch: number; members: GroupCallMember[] }
+  | { op: 'groupCallState'; callId: string; chatId: Id; epoch: number; members: GroupCallMember[]; joinMuted?: boolean }
   | { op: 'groupCallKeys'; callId: string; epoch: number; from: Id; userId: Id; data: string }
   | { op: 'groupCallEnded'; callId: string; chatId: Id }
   | { op: 'groupCallMuted'; callId: string; by: Id }       // админ выключил тебе микрофон
@@ -73,7 +75,9 @@ export function parseGroupCallFrame(f: Record<string, unknown>): GroupCallClient
     case 'groupCallPing': return uuid(f.callId) ? { op: 'groupCallPing', callId: id() } : null;
     case 'groupCallGet': return reqId(f.reqId) && int(f.chatId) ? { op: 'groupCallGet', reqId: f.reqId, chatId: f.chatId } : null;
     case 'groupCallEnd': return reqId(f.reqId) && uuid(f.callId) ? { op: 'groupCallEnd', reqId: f.reqId, callId: id() } : null;
-    case 'groupCallMute': case 'groupCallKick':
+    case 'groupCallSettings':
+      return reqId(f.reqId) && uuid(f.callId) && bool(f.joinMuted) ? { op: 'groupCallSettings', reqId: f.reqId, callId: id(), joinMuted: f.joinMuted } : null;
+    case 'groupCallMute': case 'groupCallKick': case 'groupCallAllow':
       return reqId(f.reqId) && uuid(f.callId) && int(f.userId) ? { op: f.op, reqId: f.reqId, callId: id(), userId: f.userId } : null;
     default: return null;
   }
