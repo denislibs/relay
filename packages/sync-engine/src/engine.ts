@@ -519,7 +519,11 @@ export class Engine {
    * выбрасываем и просим заново. Без сети — только кэш; сеть вернулась — sync спросит сам.
    */
   private refreshSavedDialogs(next = false): Promise<void> {
-    if (this.savedLoading) { if (!next) this.savedAgain = true; return this.savedLoading; }
+    // идёт загрузка: первую страницу перечитаем после неё, а следующую — запросим после неё (иначе подгрузка теряется)
+    if (this.savedLoading) {
+      if (!next) { this.savedAgain = true; return this.savedLoading; }
+      return this.savedLoading.then(() => this.refreshSavedDialogs(true));
+    }
     const chat = savedChatOf(this.store);
     if (!chat || !this.online || !this.ready) return Promise.resolve();
     const cache = this.store.savedDialogs, rev = cache.rev, at = next ? cache.meta.next : null;
