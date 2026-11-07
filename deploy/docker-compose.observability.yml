@@ -101,6 +101,7 @@ services:
       - --no-collector.zfs
       - --no-collector.btrfs
       - --no-collector.xfs
+      - --collector.processes   # число процессов по состоянию: тревога RelayZombieProcesses
     pid: host
     volumes:
       - /:/host:ro,rslave
