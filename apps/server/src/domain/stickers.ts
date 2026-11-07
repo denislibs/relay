@@ -120,9 +120,12 @@ export async function greetingSticker(): Promise<StickerRef | null> {
 
 const changed = (tx: Tx, userId: number) => appendUpdates(tx, [{ userId, update: { type: 'myStickers' } }]);
 
-/** Паки по умолчанию — один раз за жизнь аккаунта. */
+/** Паки по умолчанию — один раз за жизнь аккаунта. Пока каталог пуст (ассеты ещё не импортированы), отметку не ставим:
+ *  иначе аккаунт навсегда остаётся без паков. */
 async function ensureDefaults(userId: number): Promise<void> {
   await sql.begin(async (tx) => {
+    const [any] = await tx`select 1 from sticker_sets where kind = 'sticker' limit 1`;
+    if (!any) return;
     const [first] = await tx`insert into user_sticker_init (user_id) values (${userId}) on conflict do nothing returning user_id`;
     if (!first) return;
     await tx`insert into user_sticker_sets (user_id, set_id, position)
