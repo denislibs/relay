@@ -45,3 +45,11 @@ test('server error codes pass through untouched and are not retried', async () =
 test('no network: offline', async () => {
   expect(await call('/auth/code', {}, { fetch: fake(new TypeError('Failed to fetch')) })).toEqual({ ok: false, code: 'offline' });
 });
+
+test('flood: retryAfter from the body or Retry-After; a bare 429 from the proxy is flood too; the text says when', async () => {
+  expect(await call('/auth/code', { login: '+7' }, { fetch: fake(json(429, { code: 'flood', retryAfter: 600 })), delays: [0] })).toEqual({ ok: false, code: 'flood', retryAfter: 600 });
+  const bare = new Response('<html>429</html>', { status: 429, headers: { 'retry-after': '5' } });
+  expect(await call('/auth/code', { login: '+7' }, { fetch: fake(bare), delays: [0] })).toEqual({ ok: false, code: 'flood', retryAfter: 5 });
+  expect(errorText('flood', 600)).toBe('Слишком много попыток. Попробуйте через 10 мин');
+  expect(errorText('flood', 40)).toBe('Слишком много попыток. Попробуйте через 40 с');
+});

@@ -6,8 +6,10 @@ import { CallCryptoError, commitOf, deriveSession, ephemeral, type Ephemeral, ty
 import { failureOf, getCamera, getMic, stopStream, VIDEO_BITRATE } from './media';
 import { soundSink, sounds, warmCallSounds } from './sounds';
 import { loadUnseenCalls, noteMissedCall } from './callsList';
-import { levelOf, sampleOf, smoother, videoCap, type NetLevel, type NetSample } from './quality';
+import { levelOf, pathOf, sampleOf, smoother, videoCap, type NetLevel, type NetSample } from './quality';
 import { closeCallNotification, parseCallHash, showCallNotification, type CallIntent } from './callNotify';
+import { floodWait } from '../flood';
+import { errorReporter } from '../errorReport';
 
 /**
  * Звонок 1:1 на странице (docs/plans/2026-11-06-relay-calls.md). RTCPeerConnection в воркере нет, поэтому звонок
@@ -151,7 +153,7 @@ export async function startCall(chatId: number, peerId: number, video: boolean):
   a.commit = await commitOf(callId, a.mine.pub);
   let r: { ok: boolean; reason?: string };
   try { r = await send({ op: 'callRequest', callId, chatId, video, commit: a.commit, tab: TAB }) as { ok: boolean; reason?: string }; }
-  catch { return finish(a, 'offline', false); }
+  catch (e) { return finish(a, floodWait(e) != null ? 'flood' : 'offline', false); }
   if (a.ended) return;
   if (!r.ok) {
     if (r.reason === 'busy') sounds.busy(vol());
@@ -184,7 +186,7 @@ export async function acceptCall(withVideo: boolean): Promise<void> {
   a.pubB = a.mine.pub;
   let r: { ok: boolean; reason?: string };
   try { r = await send({ op: 'callAccept', callId: inc.callId, tab: TAB, pub: a.mine.pub }) as { ok: boolean; reason?: string }; }
-  catch { return finish(a, 'offline', false); }
+  catch (e) { return finish(a, floodWait(e) != null ? 'flood' : 'offline', false); }
   if (!r.ok) return finish(a, r.reason === 'in_call' ? 'in_call' : 'gone', false);
   armConnectTimeout(a);
 }
@@ -630,6 +632,8 @@ function restartIce(a: Active): void {
 async function verifyTransport(a: Active): Promise<void> {
   const stats = await a.pc!.getStats().catch(() => null);
   if (!stats || cur !== a) return;
+  const path = pathOf(stats);
+  if (path) errorReporter.callPath('p2p', path);   // доля звонков через TURN — на сервер (relay_call_paths_total)
   let remoteFp: string | null = null, localFp: string | null = null;
   stats.forEach((r) => {
     if (r.type !== 'transport') return;
@@ -648,11 +652,14 @@ async function verifyTransport(a: Active): Promise<void> {
 // Завершение
 
 function hangupFailed(a: Active): void {
+  // ICE/DTLS не сошлись, TURN недоступен, не дождались соединения — на сервер, с состоянием соединения
+  errorReporter.report('call', `p2p failed: connection=${a.pc?.connectionState ?? 'none'} ice=${a.pc?.iceConnectionState ?? 'none'} connected=${a.view.startedAt != null} relay=${a.view.relay}`);
   void send({ op: 'callHangup', callId: a.view.callId, failed: true }).catch(() => {});
   finish(a, 'failed', true);
 }
 
 function securityFail(a: Active): void {
+  errorReporter.report('call', 'p2p security: DTLS fingerprint mismatch');
   void send({ op: 'callHangup', callId: a.view.callId, failed: true }).catch(() => {});
   finish(a, 'security', true);
 }

@@ -1,4 +1,5 @@
 import { sql } from '../db';
+import { codeDeliveries } from '../obs/appMetrics';
 import { PermanentError } from '../jobs/handlers';
 import { enqueue, type Db } from '../jobs/queue';
 import { botApi } from './telegramBot';
@@ -61,14 +62,14 @@ export async function deliverExternal(item: CodeItem, env: Env = process.env): P
   const ch = codeChannel(env);
   if (ch !== 'telegram') throw new PermanentError(`code delivery: channel ${ch} is not external`);
   const label = `code delivery: telegram ${item.kind} for ${maskTo(item.to)}`;
-  if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) { console.warn(`${label}: expired before delivery, dropped`); return; }
+  if (item.expiresAt && Date.parse(item.expiresAt) <= Date.now()) { codeDeliveries.inc({ channel: 'telegram', result: 'expired' }); console.warn(`${label}: expired before delivery, dropped`); return; }
   const cap = telegramDailyCap(env);
   // место под потолком — занимаем до отправки одной командой: параллельные воркеры не проскочат его вместе
   const [slot] = await sql`
     insert into code_deliveries (channel, day, n) values ('telegram', (now() at time zone 'utc')::date, 1)
     on conflict (channel, day) do update set n = code_deliveries.n + 1 where code_deliveries.n < ${cap}
     returning n`;
-  if (!slot) { console.warn(`${label}: daily cap ${cap} reached, not sent (TELEGRAM_DAILY_CAP)`); return; }
+  if (!slot) { codeDeliveries.inc({ channel: 'telegram', result: 'capped' }); console.warn(`${label}: daily cap ${cap} reached, not sent (TELEGRAM_DAILY_CAP)`); return; }
   try {
     // номер подтверждён в боте («Войти через Telegram», telegramLogin.ts) — код самому человеку, иначе владельцу
     if (!(await sendDirect(item, env))) {
@@ -77,9 +78,11 @@ export async function deliverExternal(item: CodeItem, env: Env = process.env): P
     }
   } catch (e) {
     await sql`update code_deliveries set n = n - 1 where channel = 'telegram' and day = (now() at time zone 'utc')::date and n > 0`;
+    codeDeliveries.inc({ channel: 'telegram', result: 'failed' });
     console.warn(`${label}: failed — ${(e as Error).message}`);
     throw e;
   }
+  codeDeliveries.inc({ channel: 'telegram', result: 'ok' });
   const sent = Number(slot.n);
   if (sent === 1) await sql`delete from code_deliveries where day < (now() at time zone 'utc')::date - 7`;
   console.log(`${label}: sent${direct.has(item) ? ' to the bound chat' : ''}`);

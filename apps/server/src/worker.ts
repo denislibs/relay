@@ -1,6 +1,9 @@
 // секреты из *_FILE (secretFiles.ts) — до всего, что читает окружение
 import './secretFiles';
 import { sql } from './db';
+import { startMetricsServer } from './obs/server';
+import { collectQueueMetrics } from './obs/jobsMetrics';
+import { BUILD_ID } from './obs/metrics';
 import { initPeerKeys } from './crypto/peerKey';
 import { SLOW_KINDS } from './jobs/kinds';
 import { enqueue, ensurePeriodic } from './jobs/queue';
@@ -48,6 +51,10 @@ const { setupWebhook, startPolling, telegramLoginEnabled } = await import('./dom
 const telegram = !telegramLoginEnabled() ? null
   : process.env.TELEGRAM_WEBHOOK_URL ? (await setupWebhook().catch((e) => console.error(`telegram login: setWebhook — ${(e as Error).message}`)), null)
   : startPolling();
+// /metrics (задачи, очередь, доставка кодов) и /ready — внутренний порт воркера (obs/server.ts)
+collectQueueMetrics();
+const metrics = startMetricsServer({ role: 'worker' });
+if (metrics) console.log(`relay worker metrics on :${metrics.port} (build ${BUILD_ID})`);
 console.log('relay worker started');
 // «жив» для healthcheck (deploy/docker-compose.prod.yml): запуск прошёл, цикл событий крутится — файл свежий
 const healthFile = process.env.HEALTH_FILE;

@@ -1,4 +1,6 @@
 import { sql } from '../db';
+import { jobDuration, jobsProcessed } from '../obs/appMetrics';
+import { log } from '../obs/log';
 import { batchHandlers, handlers, PermanentError } from './handlers';
 import { claim, complete, completeMany, fail, LEASE_SEC, type Job, type KindFilter } from './queue';
 
@@ -11,9 +13,12 @@ type Done = (job: Job) => Promise<void>;
 export async function runJob(job: Job, done: Done = complete): Promise<void> {
   const h = handlers[job.kind];
   if (!h) { await fail(job, new Error(`no handler for ${job.kind}`), { retry: false }); return; }
+  const t0 = performance.now();
   try {
     const res = await h(job.payload, job);
+    jobDuration.observe({ kind: job.kind }, (performance.now() - t0) / 1000);
     await (res ? complete(job, res.again) : done(job));
+    jobsProcessed.inc({ kind: job.kind, result: 'ok' });
   } catch (e) {
     await fail(job, e, { retry: !(e instanceof PermanentError) });
   }
@@ -31,14 +36,16 @@ async function eachLimited<T>(items: T[], n: number, fn: (x: T) => Promise<void>
  */
 export async function runBatch(jobs: Job[]): Promise<void> {
   const kind = jobs[0].kind;
+  const t0 = performance.now();
   try {
     await batchHandlers[kind].run(jobs);
+    jobDuration.observe({ kind }, (performance.now() - t0) / 1000);
   } catch (e) {
-    console.error(`jobs ${kind}: batch of ${jobs.length} failed, running one by one:`, e);
+    log.warn('job batch failed, running one by one', { kind, size: jobs.length, error: e });
     await eachLimited(jobs, 10, (j) => runJob(j));
     return;
   }
-  await completeMany(jobs).catch((e) => Promise.all(jobs.map((j) => fail(j, e))));
+  await completeMany(jobs).then(() => jobsProcessed.inc({ kind, result: 'ok' }, jobs.length), (e) => Promise.all(jobs.map((j) => fail(j, e))));
 }
 
 /**

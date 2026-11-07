@@ -1,9 +1,11 @@
 import { createHmac } from 'node:crypto';
+import { callEnds, callRequests } from '../obs/appMetrics';
 import { CALL_PING_MS, CALL_RING_MS, type CallEndReason, type CallInfo, type CallServerFrame, type IceServer } from '@relay/protocol';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { hit, key, PREFIX, valkey } from '../valkey';
 import { DomainError } from './errors';
+import { count } from './flood';
 import { serviceMessage } from './groups';
 import { canSee, privacyCtx } from './privacy';
 import { onlineUsers } from './liveRegistry';
@@ -25,7 +27,6 @@ export type Publish = (topic: string, msg: string) => void;
 const RING_TTL = Math.ceil(CALL_RING_MS / 1000) + 15;
 const LIVE_TTL = Math.ceil((CALL_PING_MS * 3) / 1000) + 10;   // три пропущенных подтверждения — звонок брошен
 const ENDED_TTL = 120;                                          // ended держим недолго: поздний кадр получит «звонок завершён»
-const REQUESTS_PER_MIN = 10;
 const SIGNALS_PER_SEC = 60;
 
 const run = (script: string, keys: string[], args: (string | number)[]) =>
@@ -118,7 +119,17 @@ export function iceServersFor(userId: number, now = Date.now(), env: Record<stri
 /** Звонок в личный чат. Отказ по приватности и блокировке — одинаковый «недоступен», без причины. */
 export async function requestCall(publish: Publish, userId: number, sessionId: number,
   f: { callId: string; chatId: number; video: boolean; commit: string; tab: string }): Promise<{ ok: true } | { ok: false; reason: 'unavailable' | 'in_call' | 'busy' | 'flood' }> {
-  if ((await hit(`callreq:${userId}`, 60)) > REQUESTS_PER_MIN) return { ok: false, reason: 'flood' };
+  // исход попытки — в relay_call_requests_total (ok или причина отказа; исключение — код ошибки)
+  try {
+    const r = await requestCallOnce(publish, userId, sessionId, f);
+    callRequests.inc({ result: r.ok ? 'ok' : r.reason });
+    return r;
+  } catch (e) { callRequests.inc({ result: e instanceof DomainError ? e.code : 'internal' }); throw e; }
+}
+
+async function requestCallOnce(publish: Publish, userId: number, sessionId: number,
+  f: { callId: string; chatId: number; video: boolean; commit: string; tab: string }): Promise<{ ok: true } | { ok: false; reason: 'unavailable' | 'in_call' | 'busy' | 'flood' }> {
+  if (await count('callRing', userId)) return { ok: false, reason: 'flood' };   // domain/flood.ts
   const [c] = await sql`
     select c.kind, o.user_id as peer, u.system
       from chats c
@@ -248,6 +259,7 @@ export async function currentCall(userId: number): Promise<CallInfo | null> {
 }
 
 async function finish(publish: Publish, c: Call, reason: CallEndReason): Promise<void> {
+  callEnds.inc({ reason });
   const r = (await run(END, [callKey(c.id), busyKey(c.caller), busyKey(c.callee), incomingKey(c.callee)], [c.id, ENDED_TTL])) as [string, string] | null;
   if (!r) return;   // уже завершил кто-то другой (и написал историю)
   const duration = r[1] ? Math.max(0, Math.round((Date.now() - Number(r[1])) / 1000)) : undefined;

@@ -1,5 +1,6 @@
 /** Вызовы /auth/*: ответ — данные или код ошибки сервера ('offline' — нет сети). */
 import { bindProof, type DeviceProof } from '@relay/sync-engine/src/device';
+import { waitText } from '../../flood';
 
 /**
  * Шаги, после которых может появиться сеанс (и QR/паскей, чей вызов привязан к устройству): к ним — ключ устройства
@@ -14,7 +15,8 @@ export type Step =
   | { passwordNeeded: true; pendingId: string; hint: string }
   | { signupRequired: true; pendingId: string };
 
-export type Result<T> = { ok: true; data: T } | { ok: false; code: string };
+/** retryAfter — у flood: секунд до повтора (сервер или nginx, docs/protection.md) */
+export type Result<T> = { ok: true; data: T } | { ok: false; code: string; retryAfter?: number };
 
 /** Прокси (nginx) не достучался до API — 502/503 без нашего JSON: сервер перезапускается, запрос до него не дошёл. */
 const RETRY_MS = [300, 700, 1500, 2500];
@@ -38,9 +40,12 @@ export async function call<T>(path: string, body?: unknown, opts: { fetch?: type
     } catch {
       return { ok: false, code: 'offline' };
     }
-    const data = (await res.json().catch(() => null)) as { code?: unknown } | null;
+    const data = (await res.json().catch(() => null)) as { code?: unknown; retryAfter?: unknown } | null;
     if (res.ok) return { ok: true, data: (data ?? {}) as T };
-    if (typeof data?.code === 'string') return { ok: false, code: data.code };
+    // слишком часто: секунды — из тела или Retry-After; 429 без нашего JSON (прокси) — тоже flood
+    const after = Number(data?.retryAfter ?? res.headers.get('retry-after')) || undefined;
+    if (typeof data?.code === 'string') return data.code === 'flood' && after ? { ok: false, code: 'flood', retryAfter: after } : { ok: false, code: data.code };
+    if (res.status === 429) return after ? { ok: false, code: 'flood', retryAfter: after } : { ok: false, code: 'flood' };
     const gateway = res.status === 502 || res.status === 503 || res.status === 504;
     if (gateway && res.status !== 504 && attempt < delays.length) { await new Promise((r) => setTimeout(r, delays[attempt])); continue; }
     return { ok: false, code: gateway ? 'unavailable' : 'internal' };
@@ -63,7 +68,9 @@ export const ERRORS: Record<string, string> = {
   bad_frame: 'Проверьте введённые данные',
   internal: 'Ошибка на сервере — попробуйте ещё раз',
 };
-export const errorText = (code: string) => ERRORS[code] ?? ERRORS.internal;
+/** Текст ошибки; у flood с retryAfter — когда можно снова («Попробуйте через 12 мин»). */
+export const errorText = (code: string, retryAfter?: number) =>
+  code === 'flood' && retryAfter ? `Слишком много попыток. Попробуйте ${waitText(retryAfter)}` : ERRORS[code] ?? ERRORS.internal;
 
 /** Вход завершён: сеанс в cookie. main.tsx слушает и запускает приложение. */
 export function signedIn(): void {

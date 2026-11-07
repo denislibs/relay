@@ -264,7 +264,7 @@ export interface ContactPatch { firstName?: string; lastName?: string; note?: st
 export const addContact = (userId: number, firstName: string, lastName = '', query?: string): Promise<unknown> => call({ type: 'addContact', userId, firstName, lastName, ...(query ? { query } : {}) });
 export const updateContact = (userId: number, patch: ContactPatch): Promise<unknown> => call({ type: 'updateContact', userId, ...patch });
 export const removeContact = (userId: number): Promise<unknown> => call({ type: 'removeContact', userId });
-export type ResolveResult = { user: Item & { id: number; name: string } } | { notFound: true } | { offline: true };
+export type ResolveResult = { user: Item & { id: number; name: string } } | { notFound: true } | { offline: true } | { flood: number };
 export const resolveUser = (query: string): Promise<ResolveResult> =>
   call<ResolveResult>({ type: 'resolveUser', query }).catch(() => ({ offline: true as const }));
 

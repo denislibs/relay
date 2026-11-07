@@ -74,3 +74,25 @@ test('forward: copies appear at once in each target chat, an album stays one gro
   expect(rows.map((r) => r.body)).toEqual(['смотри', 'первое', 'второе']);
   expect(rows[2].fwd_from).toMatchObject({ userId: a.userId, name: 'Анна' });
 });
+
+test('flood (FLOOD_WAIT): over the send limit messages stay pending, status shows the wait, then they go out in order', async () => {
+  const { setLimit } = await import('../../../apps/server/src/domain/flood');
+  setLimit('send', [[2, 3]]);   // 2 сообщения за 3 с: третье ждёт конца окна
+  try {
+    const a = await srv.login('a'), b = await srv.login('b');
+    const chatId = await srv.chat(a.token, [a.userId, b.userId]);
+    const ea = await open(srv.config(a));
+    ea.connect();
+    await ea.whenIdle();
+    const feed = watchInto(ea, { kind: 'messages', chatId, limit: 50 });
+    const status = watchInto(ea, { kind: 'status' });
+    for (const body of ['раз', 'два', 'три', 'четыре']) await ea.call({ type: 'sendMessage', chatId, body });
+    // сервер сказал «подождите» — не «не отправлено»: часики и срок в статусе
+    await status.until((l) => ((l[0] as { floodUntil?: number } | undefined)?.floodUntil ?? 0) > Date.now());
+    const waiting = await feed.until((l) => l.length === 4 && l.some((m) => m.status === 'pending'));
+    expect(waiting.every((m) => m.status !== 'failed')).toBe(true);
+    const sent = await feed.until((l) => l.length === 4 && l.every((m) => m.status === 'sent'), 8000);
+    expect(sent.map((m) => m.body)).toEqual(['раз', 'два', 'три', 'четыре']);
+    await status.until((l) => !(l[0] as { floodUntil?: number } | undefined)?.floodUntil);
+  } finally { setLimit(); }
+});

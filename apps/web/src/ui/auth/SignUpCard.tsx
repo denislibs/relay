@@ -24,7 +24,7 @@ export function SignUpCard(props: { card: Extract<Card, { name: 'signup' }> }) {
     if (r.ok) { flow.finish(r.data); return; }
     setBusy(false);
     if (r.code === 'code_expired') { flow.go({ name: 'phone', phone: props.card.phone }); return; }
-    setError(errorText(r.code));
+    setError(errorText(r.code, r.retryAfter));
   }
 
   return (

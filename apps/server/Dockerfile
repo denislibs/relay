@@ -10,7 +10,10 @@ COPY packages/relay-ui/package.json packages/relay-ui/
 COPY apps/web/package.json apps/web/
 RUN bun install --frozen-lockfile
 COPY . .
-RUN bun apps/web/build.ts
+# id сборки (CI: --build-arg BUILD_ID=<git sha>): одна и та же у клиента (__BUILD__) и у метрик/логов сервера
+# (obs/metrics.ts читает /app/BUILD_ID); без аргумента — время сборки, как раньше
+ARG BUILD_ID
+RUN BUILD_ID="${BUILD_ID:-$(date +%s)}" && printf %s "$BUILD_ID" > /app/BUILD_ID && BUILD_ID="$BUILD_ID" bun apps/web/build.ts
 # не от root (INFRA-5): ffmpeg разбирает чужие файлы; процессу не нужно ничего, кроме чтения /app и /tmp
 RUN chown -R bun:bun /app/apps/web/dist
 # журнал аудита сервиса ключей (том keys-audit, docker-compose.secure.yml): пустой том берёт владельца из образа

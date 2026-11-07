@@ -1,6 +1,7 @@
 import { createHash, randomInt } from 'node:crypto';
 import { sql, type Tx } from '../db';
 import { DomainError } from './errors';
+import { limit, phonePrefix } from './flood';
 import { postService, systemUserId } from './service';
 import { updateContent } from './messageContent';
 import { fanOut } from './journal';
@@ -57,7 +58,9 @@ export async function hideLoginCodes(tx: Tx, userId: number, note: string): Prom
 
 /** Нормализованный логин — ключ лимитов: телефон как есть (после trim), имя без «@» и в нижнем регистре. */
 const normalize = (login: string) => { const s = login.trim(); return s.startsWith('+') ? s : s.replace(/^@/, '').toLowerCase(); };
-const MAX_WRONG_PER_HOUR = 15, MAX_PER_IP_HOUR = 30;
+const MAX_WRONG_PER_HOUR = 15;
+/** кодов с одного адреса в час: только против явного перебора — за адресом CGNAT тысячи людей (RELAY_LOGIN_PER_IP_HOUR) */
+const maxPerIpHour = () => Number(process.env.RELAY_LOGIN_PER_IP_HOUR) || 200;
 /** burnCodes: серии длиннее — не код, а мусор; окон на сообщение не больше BURN_MAX_WINDOWS (работа ограничена). */
 const BURN_MAX_RUN = 64, BURN_MAX_WINDOWS = 256;
 
@@ -90,17 +93,21 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     await tx`select pg_advisory_xact_lock(hashtext(${'login:' + key}))`;
     if (ip) {
       await tx`select pg_advisory_xact_lock(hashtext(${'ip:' + ip}))`;
-      const [{ n }] = await tx`select count(*)::int as n from login_attempts where ip = ${ip} and created_at > now() - interval '1 hour'`;
-      if (n >= MAX_PER_IP_HOUR) throw new DomainError('flood');
+      const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from login_attempts where ip = ${ip} and created_at > now() - interval '1 hour'`;
+      if (n >= maxPerIpHour()) throw new DomainError('flood', 'login ip', wait);
     }
-    const [{ n }] = await tx`select count(*)::int as n from login_attempts where login = ${key} and created_at > now() - interval '1 hour'`;
-    if (n >= MAX_PER_HOUR) throw new DomainError('flood');
+    const [{ n, wait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from login_attempts where login = ${key} and created_at > now() - interval '1 hour'`;
+    if (n >= MAX_PER_HOUR) throw new DomainError('flood', 'login', wait);
     if (userId != null) {
       // порядок замков везде один (логин → адрес → аккаунт) — взаимной блокировки нет
       await tx`select pg_advisory_xact_lock(hashtext(${'user:' + userId}))`;
-      const [{ n: own }] = await tx`select count(*)::int as n from login_attempts where user_id = ${userId} and created_at > now() - interval '1 hour'`;
-      if (own >= MAX_PER_HOUR) throw new DomainError('flood');
+      const [{ n: own, wait: ownWait }] = await tx`select count(*)::int as n, greatest(1, ceil(extract(epoch from min(created_at) + interval '1 hour' - now())))::int as wait from login_attempts where user_id = ${userId} and created_at > now() - interval '1 hour'`;
+      if (own >= MAX_PER_HOUR) throw new DomainError('flood', 'login user', ownWait);
     }
+    // на страну (код номера) и бюджет сервера за сутки (domain/flood.ts) — после своих лимитов: их отказы бюджет не тратят
+    const cc = phonePrefix(key);
+    if (cc) await limit('loginPrefix', cc);
+    await limit('loginGlobal', '*');
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
       // новый номер: регистрация возможна, только если код есть куда доставить (канал доставки, не служебный чат)

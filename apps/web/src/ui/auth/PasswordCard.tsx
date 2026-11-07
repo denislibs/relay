@@ -27,26 +27,26 @@ export function PasswordCard(props: { card: Extract<Card, { name: 'password' }> 
     setBusy(true);
     setError(null);
     const ch = await call<{ srpId: string; salt: string; B: string }>('/auth/password/challenge', { pendingId: card.pendingId });
-    if (!ch.ok) return fail(ch.code);
+    if (!ch.ok) return fail(ch.code, ch.retryAfter);
     let proof: { A: string; M1: string };
     try { proof = await clientProof(password, ch.data.salt, ch.data.B); } catch { return fail('internal'); }
     const r = await call<Step>('/auth/password/check', { pendingId: card.pendingId, srpId: ch.data.srpId, ...proof });
     if (r.ok) { flow.finish(r.data); return; }
-    fail(r.code);
+    fail(r.code, r.retryAfter);
   }
 
-  function fail(code: string) {
+  function fail(code: string, retryAfter?: number) {
     setBusy(false);
     if (code === 'password_invalid') { setWrong(true); requestAnimationFrame(() => input.current?.select()); return; }
     if (code === 'code_expired') { flow.go({ name: 'phone' }); return; }   // вход устарел — заново
-    setError(errorText(code));
+    setError(errorText(code, retryAfter));
   }
 
   async function forgot() {
     setRecovering(true);
     const r = await call<{ emailPattern: string }>('/auth/password/recover', { pendingId: card.pendingId });
     setRecovering(false);
-    if (!r.ok) { setError(errorText(r.code)); return; }
+    if (!r.ok) { setError(errorText(r.code, r.retryAfter)); return; }
     flow.go({ name: 'recover', pendingId: card.pendingId, hint: card.hint, emailPattern: r.data.emailPattern });
   }
 
@@ -108,7 +108,7 @@ export function RecoverCard(props: { card: Extract<Card, { name: 'recover' }> })
     if (r.ok) { flow.finish(r.data); return; }
     setBusy(false);
     setCode('');
-    setError(errorText(r.code));
+    setError(errorText(r.code, r.retryAfter));
   }
 
   return (

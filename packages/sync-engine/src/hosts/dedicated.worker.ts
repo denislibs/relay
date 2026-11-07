@@ -3,9 +3,11 @@
 import { Engine } from '../engine';
 import { fromMessagePort, type FromHost, type ToHost } from '../host-core';
 import { createDedicatedHost } from './dedicated';
+import { createErrorReporter, reportUncaught } from '../errorReport';
 
 const scope = self as unknown as { name: string; postMessage(m: unknown): void; onmessage: ((e: MessageEvent) => void) | null };
 const build = scope.name.split('@')[1] ?? 'dev';
+reportUncaught(self, createErrorReporter({ build }), { error: 'worker', rejection: 'worker' });   // как в shared.worker.ts
 
 createDedicatedHost({
   self: fromMessagePort<ToHost, FromHost>(scope),

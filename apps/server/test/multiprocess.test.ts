@@ -9,7 +9,7 @@ const procs: ReturnType<typeof Bun.spawn>[] = [];
 beforeAll(async () => {
   await resetDb();
   for (const port of PORTS) {
-    procs.push(Bun.spawn(['bun', 'src/main.ts'], { cwd: import.meta.dir + '/..', env: { ...process.env, PORT: String(port), RELAY_PRESENCE_GRACE_MS: '200' }, stdout: 'inherit', stderr: 'inherit' }));
+    procs.push(Bun.spawn(['bun', 'src/main.ts'], { cwd: import.meta.dir + '/..', env: { ...process.env, PORT: String(port), METRICS_PORT: '0', RELAY_PRESENCE_GRACE_MS: '200' }, stdout: 'inherit', stderr: 'inherit' }));
   }
   for (const port of PORTS) {
     for (let i = 0; i < 100; i++) {

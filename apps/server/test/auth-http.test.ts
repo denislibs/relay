@@ -78,7 +78,8 @@ test('bad bodies → 400 bad_frame; sixth code request in an hour → 429 flood'
   for (let i = 0; i < 5; i++) expect((await post('/auth/code', { login: '@boris_h' })).status).toBe(200);
   const sixth = await post('/auth/code', { login: '@boris_h' });
   expect(sixth.status).toBe(429);
-  expect(await sixth.json()).toEqual({ code: 'flood' });
+  expect(await sixth.json()).toMatchObject({ code: 'flood', retryAfter: expect.any(Number) });   // FLOOD_WAIT: секунд до повтора
+  expect(Number(sixth.headers.get('retry-after'))).toBeGreaterThan(0);
 });
 
 test('login CSRF: non-JSON content type and a foreign Origin are refused', async () => {

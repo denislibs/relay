@@ -53,14 +53,15 @@ export class HostCore {
   private cfg: EngineConfig | null = null;
   private readonly startedAt = Date.now();
 
-  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine>; kind?: 'shared' | 'dedicated-leader' }) {}
+  /** onError — ошибка хоста (не вкладки) в отчёт на сервер (errorReport.ts) */
+  constructor(private opts: { build: string; open: (cfg: EngineConfig) => Promise<Engine>; kind?: 'shared' | 'dedicated-leader'; onError?: (err: unknown) => void }) {}
 
   get size(): number { return this.clients.size; }
 
   attach(port: PortLike<ToHost, FromHost>): { detach(): void } {
     const c: Client = { port, subs: new Map(), queries: new Map(), buf: [], queued: false, lastSeen: Date.now() };
     this.clients.add(c);
-    port.listen((m) => { this.onMessage(c, m).catch((err) => { console.error('host:', err); this.live?.dev.log.error('host', err); }); });
+    port.listen((m) => { this.onMessage(c, m).catch((err) => { console.error('host:', err); this.live?.dev.log.error('host', err); this.opts.onError?.(err); }); });
     return { detach: () => this.detach(c) };
   }
 
@@ -113,7 +114,7 @@ export class HostCore {
           const value = await engine.call(m.action);
           c.port.post({ t: 'result', id: m.id, ok: true, value });
         } catch (err) {
-          c.port.post({ t: 'result', id: m.id, ok: false, error: String((err as Error)?.message ?? err) });
+          c.port.post({ t: 'result', id: m.id, ok: false, error: errorText(err) });
         }
         return;
       }
@@ -190,4 +191,14 @@ export class HostCore {
     c.subs.clear();
     this.clients.delete(c);
   }
+}
+
+/**
+ * Ошибка вызова — строкой через порт: Error — его текст; отказ сервера {code, retryAfter?} — код, у flood с секундами
+ * ожидания: 'flood:12' (страница разбирает floodWait в apps/web/src/flood.ts).
+ */
+export function errorText(err: unknown): string {
+  const e = err as { code?: unknown; retryAfter?: unknown; message?: unknown } | null;
+  if (e && typeof e.code === 'string' && !(err instanceof Error)) return typeof e.retryAfter === 'number' && e.retryAfter > 0 ? `${e.code}:${e.retryAfter}` : e.code;
+  return String(e?.message ?? err);
 }
