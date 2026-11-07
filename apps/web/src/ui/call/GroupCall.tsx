@@ -11,6 +11,8 @@ import { avatarPhoto } from '../../profilePhoto';
 import { useUser } from '../../settingsData';
 import { chatTone } from '../format';
 import { useNow } from './CallSlot';
+import { openGroupPip, useAutoPip } from './CallPip';
+import { pipKind } from '../../calls/pip';
 
 /**
  * Групповой звонок (docs/plans/2026-11-07-relay-group-calls.md): экран с плитками и списком участников, плашка над
@@ -24,6 +26,7 @@ const plural = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'участни�
 export function GroupCallLayer() {
   const gc = useGlobal((s) => s.groupCall);
   const min = useGlobal((s) => s.groupCallMin);
+  useAutoPip(!!gc && (gc.phase === 'active' || gc.phase === 'reconnecting'), openGroupPip);
   const last = useRef<GroupCallView | null>(null);
   if (gc) last.current = gc;
   const v = gc ?? last.current;
@@ -112,6 +115,7 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
         </div>
         <div class="app-gcall-topright">
           {v.emoji ? <button type="button" class="app-call-emoji" aria-label="Ключ шифрования" onClick={() => setHint((x) => !x)}>{v.emoji.map((e, i) => <span key={i}>{e}</span>)}</button> : null}
+          {pipKind() && v.phase !== 'ended' ? <button type="button" class="app-call-icon" aria-label="Картинка в картинке" onClick={() => void openGroupPip()}><Icon name="pip" size={22} /></button> : null}
           <button type="button" class="app-call-icon" aria-label={list ? 'Скрыть участников' : 'Показать участников'} onClick={() => setList((x) => !x)}><Icon name="users" size={22} /></button>
         </div>
       </div>

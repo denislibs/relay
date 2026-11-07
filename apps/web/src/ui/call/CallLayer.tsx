@@ -4,6 +4,8 @@ import { acceptCall, callStreams, declineCall, hangup, setCallBackground, toggle
 import { callStatus } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
 import { CallPlate, useNow, usePeer } from './CallSlot';
+import { openCallPip, useAutoPip } from './CallPip';
+import { pipKind } from '../../calls/pip';
 
 /**
  * Звонок поверх приложения (docs/plans/2026-11-06-relay-calls.md): входящий — карточкой, разговор — экраном
@@ -14,6 +16,8 @@ export function CallLayer() {
   const call = useGlobal((s) => s.call);
   const min = useGlobal((s) => s.callMin);
   const chatOpen = useGlobal((s) => s.openChatId != null);
+  // и свёрнутый звонок: уход с вкладки открывает PiP (слой смонтирован всегда, экран звонка — нет)
+  useAutoPip(!!call && call.phase !== 'incoming' && call.phase !== 'ended' && call.phase !== 'requesting', openCallPip);
   const last = useRef<CallView | null>(null);
   if (call) last.current = call;
   const v = call ?? last.current;
@@ -52,7 +56,7 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
             {v.emoji.map((e, i) => <span key={i}>{e}</span>)}
           </button>
         ) : <span />}
-        <span />
+        {!incoming && !ended && pipKind() ? <button type="button" class="app-call-icon" aria-label="Картинка в картинке" onClick={() => void openCallPip()}><Icon name="pip" size={22} /></button> : <span />}
       </div>
       {emojiHint && v.emoji ? (
         <div class="app-call-hint" role="note">
