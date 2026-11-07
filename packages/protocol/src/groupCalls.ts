@@ -23,6 +23,10 @@ export const GROUP_CALL_TITLE_MAX = 64;
 export interface GroupCallMember { userId: Id; session: Id; pub: string; muted: boolean; video: boolean; screen: boolean; hand: number | null; joinedAt: number; mutedByAdmin?: boolean; mutedOnJoin?: boolean }   // mutedOnJoin — без микрофона по правилу «новые участники без микрофона»
 
 /** Служебное «X начал(а) звонок» / «Звонок завершён (N мин)». */
+/** Что видно по ссылке до входа: звонок, кто в нём, нужно ли одобрение. */
+export interface GroupCallLinkPreview { callId: string; chatId: Id; chatTitle: string | null; title: string | null; count: number; faces: Id[]; approval: boolean; member: boolean }
+const TOKEN = /^[A-Za-z0-9_-]{22}$/;
+
 export interface GroupCallServiceData { callId: string; state: 'started' | 'ended' | 'scheduled'; duration?: number; at?: number; title?: string }   // scheduled — «запланировал(а) звонок на …», callId — id плана
 
 export type GroupCallClientFrame =
@@ -37,10 +41,19 @@ export type GroupCallClientFrame =
   | { op: 'groupCallMute'; reqId: string; callId: string; userId: Id }                    // админ: выключить микрофон
   | { op: 'groupCallKick'; reqId: string; callId: string; userId: Id }                    // админ: удалить из звонка
   | { op: 'groupCallSettings'; reqId: string; callId: string; joinMuted?: boolean; title?: string }   // админ: без микрофона на входе, название звонка
-  | { op: 'groupCallAllow'; reqId: string; callId: string; userId: Id };                  // админ: снова можно говорить (после «выключить» или правила входа)       // админ: новые участники — без микрофона
+  | { op: 'groupCallAllow'; reqId: string; callId: string; userId: Id }
+  | { op: 'groupCallConference'; reqId: string; invite: Id[]; fromCall?: string }         // звонок без группы (из 1:1 — fromCall): ack { callId }
+  | { op: 'groupCallInvite'; reqId: string; callId: string; users: Id[] }                 // позвать ещё (участник конференции): ack { invited }
+  | { op: 'groupCallLink'; reqId: string; callId: string; approval: boolean; revoke?: boolean }   // ссылка-приглашение: ack { token } (revoke — отозвать все)
+  | { op: 'groupCallLinkPreview'; reqId: string; token: string }                          // ack GroupCallLinkPreview
+  | { op: 'groupCallLinkJoin'; reqId: string; token: string }                             // ack { callId, chatId } | { pending: true }
+  | { op: 'groupCallDecide'; reqId: string; callId: string; userId: Id; approve: boolean };   // админ / создатель: пустить по заявке                  // админ: снова можно говорить (после «выключить» или правила входа)       // админ: новые участники — без микрофона
 
 export type GroupCallServerFrame =
-  | { op: 'groupCallState'; callId: string; chatId: Id; epoch: number; members: GroupCallMember[]; joinMuted?: boolean; title?: string }
+  | { op: 'groupCallState'; callId: string; chatId: Id; epoch: number; members: GroupCallMember[]; joinMuted?: boolean; title?: string; requests?: { id: Id; name: string }[]; startedBy?: Id }   // requests — заявки по ссылке (имя — у постороннего профиля не видно)
+  | { op: 'groupCallInvited'; callId: string; from: Id; fromCall?: string; count: number }   // тебя зовут в звонок без группы
+  | { op: 'groupCallApproved'; callId: string; chatId: Id }   // заявку по ссылке приняли — можно входить
+  | { op: 'groupCallRefused'; callId: string }
   | { op: 'groupCallKeys'; callId: string; epoch: number; from: Id; userId: Id; data: string }
   | { op: 'groupCallEnded'; callId: string; chatId: Id }
   | { op: 'groupCallMuted'; callId: string; by: Id }       // админ выключил тебе микрофон
@@ -84,6 +97,21 @@ export function parseGroupCallFrame(f: Record<string, unknown>): GroupCallClient
       if (!reqId(f.reqId) || !uuid(f.callId) || !jm || !t || (f.joinMuted === undefined && f.title === undefined)) return null;
       return { op: 'groupCallSettings', reqId: f.reqId, callId: id(), ...(f.joinMuted !== undefined ? { joinMuted: f.joinMuted as boolean } : {}), ...(f.title !== undefined ? { title: f.title as string } : {}) };
     }
+    case 'groupCallConference': {
+      if (!reqId(f.reqId) || !Array.isArray(f.invite) || f.invite.length === 0 || f.invite.length > 30 || !(f.invite as unknown[]).every(int)) return null;
+      if (f.fromCall !== undefined && !uuid(f.fromCall)) return null;
+      return { op: 'groupCallConference', reqId: f.reqId, invite: [...new Set(f.invite as number[])], ...(f.fromCall ? { fromCall: (f.fromCall as string).toLowerCase() } : {}) };
+    }
+    case 'groupCallInvite':
+      return reqId(f.reqId) && uuid(f.callId) && Array.isArray(f.users) && f.users.length > 0 && f.users.length <= 30 && (f.users as unknown[]).every(int)
+        ? { op: 'groupCallInvite', reqId: f.reqId, callId: id(), users: [...new Set(f.users as number[])] } : null;
+    case 'groupCallLink':
+      return reqId(f.reqId) && uuid(f.callId) && bool(f.approval) && (f.revoke === undefined || bool(f.revoke))
+        ? { op: 'groupCallLink', reqId: f.reqId, callId: id(), approval: f.approval, ...(f.revoke ? { revoke: true } : {}) } : null;
+    case 'groupCallLinkPreview': case 'groupCallLinkJoin':
+      return reqId(f.reqId) && typeof f.token === 'string' && TOKEN.test(f.token) ? { op: f.op, reqId: f.reqId, token: f.token } : null;
+    case 'groupCallDecide':
+      return reqId(f.reqId) && uuid(f.callId) && int(f.userId) && bool(f.approve) ? { op: 'groupCallDecide', reqId: f.reqId, callId: id(), userId: f.userId, approve: f.approve } : null;
     case 'groupCallMute': case 'groupCallKick': case 'groupCallAllow':
       return reqId(f.reqId) && uuid(f.callId) && int(f.userId) ? { op: f.op, reqId: f.reqId, callId: id(), userId: f.userId } : null;
     default: return null;

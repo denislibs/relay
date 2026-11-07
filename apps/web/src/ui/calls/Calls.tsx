@@ -14,8 +14,22 @@ type Tab = 'all' | 'missed';
 function CallItem({ g }: { g: CallGroup }) {
   const r = g.rows[0];
   const chat = useGlobal((s) => s.chats.find((c) => c.id === r.chatId));
-  const name = String(chat?.title ?? '') || r.name || 'Пользователь';
+  const name = r.conference ? (r.conference.names.join(', ') || 'Групповой звонок') : String(chat?.title ?? '') || r.name || 'Пользователь';
   const missed = isMissed(r), bad = missed || r.reason === 'declined';
+  if (r.conference) {
+    return (
+      <div class="app-callrow" role="listitem">
+        <div class="app-callrow-main">
+          <span class="app-callrow-conf"><Icon name="users" size={24} /></span>
+          <span class="app-callrow-text">
+            <span class="app-callrow-name">{name}</span>
+            <span class="app-callrow-sub"><Icon name="arrowRight" size={16} class={'app-callbubble-arrow' + (r.outgoing ? ' is-out' : ' is-in')} />{groupText(g)}</span>
+          </span>
+          <span class="app-callrow-time">{chatTime(r.at)}</span>
+        </div>
+      </div>
+    );
+  }
   return (
     <div class="app-callrow" role="listitem">
       <button type="button" class="app-callrow-main" onPointerDown={ripple} onClick={() => openChat(r.chatId)}>

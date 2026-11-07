@@ -1,5 +1,5 @@
-import { GROUP_CALL_FACES, GROUP_CALL_MEMBERS_MAX, GROUP_CALL_PING_MS, GROUP_CALL_TITLE_MAX, graphemes, type GroupCallMember, type GroupCallPlan, type GroupCallServerFrame, type GroupCallSummary } from '@relay/protocol';
-import { createHmac } from 'node:crypto';
+import { GROUP_CALL_FACES, GROUP_CALL_MEMBERS_MAX, GROUP_CALL_PING_MS, GROUP_CALL_TITLE_MAX, graphemes, type GroupCallLinkPreview, type GroupCallMember, type GroupCallPlan, type GroupCallServerFrame, type GroupCallSummary } from '@relay/protocol';
+import { createHash, createHmac } from 'node:crypto';
 import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { hit, key, valkey } from '../valkey';
@@ -7,6 +7,8 @@ import { DomainError } from './errors';
 import { can, groupCtx, hasAdmin, type GroupCtx } from './groupRights';
 import { serviceMessage } from './groups';
 import { chatEvent } from './journal';
+import { onlineUsers } from './liveRegistry';
+import { canSee, privacyCtx } from './privacy';
 
 /**
  * Групповые звонки (docs/plans/2026-11-07-relay-group-calls.md). Медиа идёт через LiveKit; кадры шифруются на
@@ -33,6 +35,8 @@ type Member = GroupCallMember & { at: number };
 const callKey = (id: string) => key('gcall:' + id);
 const membersKey = (id: string) => key('gcall:' + id + ':m');
 const chatKey = (chatId: number) => key('gcall:chat:' + chatId);
+const allowKey = (id: string) => key('gcall:' + id + ':allow');   // кого пускать сверх участников группы (конференция, ссылка)
+const reqKey = (id: string) => key('gcall:' + id + ':req');       // заявки по ссылке «вход по одобрению»
 const send = (publish: Publish, topic: string, f: GroupCallServerFrame) => publish(topic, JSON.stringify(f));
 
 const env = (k: string) => process.env[k] ?? '';
@@ -83,13 +87,17 @@ const pub = (m: Member): GroupCallMember => { const { at: _, ...rest } = m; retu
 /** Состав и эпоха — всем, кто в звонке (их сессиям). */
 async function broadcast(publish: Publish, id: string, chatId: number, epoch: number, list?: Member[]): Promise<void> {
   const ms = list ?? await members(id);
-  const [jm, title] = (await valkey().send('HMGET', [callKey(id), 'joinMuted', 'title'])) as (string | null)[];
-  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub), ...(jm === '1' ? { joinMuted: true } : {}), ...(title ? { title } : {}) };
+  const [jm, title, by] = (await valkey().send('HMGET', [callKey(id), 'joinMuted', 'title', 'startedBy'])) as (string | null)[];
+  const reqIds = ((await valkey().send('SMEMBERS', [reqKey(id)])) as string[] | null ?? []).map(Number);
+  const requests = reqIds.length ? (await sql`select id, name from users where id = any(${reqIds}::bigint[])`).map((r) => ({ id: Number(r.id), name: String(r.name ?? '') })) : [];
+  const f: GroupCallServerFrame = { op: 'groupCallState', callId: id, chatId, epoch, members: ms.map(pub), ...(jm === '1' ? { joinMuted: true } : {}), ...(title ? { title } : {}),
+    ...(requests.length ? { requests } : {}), ...(by ? { startedBy: Number(by) } : {}) };
   for (const m of ms) send(publish, `session:${m.session}`, f);
 }
 
 /** Плашка «Идёт звонок» у всех участников группы (журнал группы). */
 async function summarize(chatId: number, id: string | null): Promise<void> {
+  if (!chatId) return;   // конференция: группы и плашки нет
   let call: GroupCallSummary | null = null;
   if (id) {
     const m = await meta(id);
@@ -154,18 +162,19 @@ export async function startGroupCall(userId: number, chatId: number): Promise<{ 
 export async function joinGroupCall(publish: Publish, userId: number, sessionId: number, f: { callId: string; pub: string; muted: boolean; video: boolean }): Promise<{ token: string; identity: string; epoch: number; chatId: number }> {
   const m = await meta(f.callId);
   if (!m) throw new DomainError('not_found', 'call');
-  const ctx = await groupCtx(sql, m.chatId, userId);
+  const access = await callAccess(m, f.callId, userId);
   const ms = await members(f.callId);
   if (!ms.some((x) => x.session === sessionId) && ms.length >= GROUP_CALL_MEMBERS_MAX) throw new DomainError('forbidden', 'full');
   const prev = ms.find((x) => x.session === sessionId);
   // «новые участники без микрофона» (админ включил): входит заглушённым, кроме админов звонка; повторный вход — как был
-  const gag = prev ? { mutedByAdmin: prev.mutedByAdmin, mutedOnJoin: prev.mutedOnJoin } : m.joinMuted && !hasAdmin(ctx, 'calls') ? { mutedByAdmin: true, mutedOnJoin: true } : {};
+  const gag = prev ? { mutedByAdmin: prev.mutedByAdmin, mutedOnJoin: prev.mutedOnJoin } : m.joinMuted && !access.admin ? { mutedByAdmin: true, mutedOnJoin: true } : {};
   const member: Member = { userId, session: sessionId, pub: f.pub, muted: gag.mutedByAdmin ? true : f.muted, video: f.video, screen: false, hand: null, joinedAt: prev?.joinedAt ?? Date.now(), at: Date.now(), ...gag };
   await valkey().send('HSET', [membersKey(f.callId), String(sessionId), JSON.stringify(member)]);
   await valkey().send('EXPIRE', [membersKey(f.callId), String(TTL)]);
   const epoch = Number(await valkey().send('HINCRBY', [callKey(f.callId), 'epoch', '1']));
   const identity = identityOf(userId, sessionId);
   const token = liveKitToken({ room: f.callId, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true, canUpdateOwnMetadata: false }, identity, 600, { name: String(userId) });
+  await sql`insert into group_call_members (call_id, user_id) values (${f.callId}, ${userId}) on conflict do nothing`.catch(() => {});
   await broadcast(publish, f.callId, m.chatId, epoch);
   await summarize(m.chatId, f.callId);
   return { token, identity, epoch, chatId: m.chatId };
@@ -219,13 +228,27 @@ export async function pingGroupCall(userId: number, sessionId: number, callId: s
 }
 
 /** Право управлять звонком: админ с «Управлением звонками» (владелец — всегда). */
-async function adminCtx(userId: number, callId: string): Promise<{ m: NonNullable<Awaited<ReturnType<typeof meta>>>; ctx: GroupCtx }> {
+async function adminCtx(userId: number, callId: string): Promise<{ m: NonNullable<Awaited<ReturnType<typeof meta>>> }> {
   const m = await meta(callId);
   if (!m) throw new DomainError('not_found', 'call');
-  const ctx = await groupCtx(sql, m.chatId, userId);
-  if (!hasAdmin(ctx, 'calls')) throw new DomainError('forbidden', 'calls');
-  return { m, ctx };
+  if (!(await callAccess(m, callId, userId)).admin) throw new DomainError('forbidden', 'calls');
+  return { m };
 }
+
+/**
+ * Кто может войти и кто управляет. Звонок группы: участник группы (админ — с правом calls) или пущенный по ссылке
+ * (только в звонок, не в группу). Конференция: допущенные (позванные, пущенные по ссылке); управляет создатель.
+ */
+async function callAccess(m: NonNullable<Awaited<ReturnType<typeof meta>>>, callId: string, userId: number): Promise<{ admin: boolean }> {
+  if (m.chatId) {
+    try { return { admin: hasAdmin(await groupCtx(sql, m.chatId, userId), 'calls') }; }
+    catch (e) { if (!(e instanceof DomainError) || !(await allowed(callId, userId))) throw e; return { admin: false }; }
+  }
+  if (m.startedBy === userId) return { admin: true };
+  if (await allowed(callId, userId)) return { admin: false };
+  throw new DomainError('not_member', 'call');
+}
+const allowed = async (callId: string, userId: number) => Number(await valkey().send('SISMEMBER', [allowKey(callId), String(userId)])) === 1;
 
 /** Выключить микрофон участнику (админ): LiveKit глушит дорожку, участник видит «вас выключил админ». */
 export async function muteGroupMember(publish: Publish, userId: number, f: { callId: string; userId: number }): Promise<{ ok: true }> {
@@ -287,8 +310,7 @@ export async function kickGroupMember(publish: Publish, byUserId: number | null,
 export async function endGroupCallBy(publish: Publish, userId: number, callId: string): Promise<{ ok: true }> {
   const m = await meta(callId);
   if (!m) return { ok: true };
-  const ctx = await groupCtx(sql, m.chatId, userId);
-  if (!(hasAdmin(ctx, 'calls') || m.startedBy === userId)) throw new DomainError('forbidden', 'calls');
+  if (!((await callAccess(m, callId, userId)).admin || m.startedBy === userId)) throw new DomainError('forbidden', 'calls');
   await endGroupCall(publish, callId);
   return { ok: true };
 }
@@ -300,14 +322,15 @@ export async function endGroupCall(publish: Publish, callId: string, alsoNotify:
   // кто первый удалил хэш звонка, тот и завершает (история — одна)
   if (!Number(await valkey().send('DEL', [callKey(callId)]))) return;
   const ms = await members(callId);
-  await valkey().send('DEL', [membersKey(callId)]);
-  const cur = (await valkey().send('GET', [chatKey(m.chatId)])) as string | null;
+  await valkey().send('DEL', [membersKey(callId), allowKey(callId), reqKey(callId)]);
+  const cur = m.chatId ? (await valkey().send('GET', [chatKey(m.chatId)])) as string | null : null;
   if (cur === callId) await valkey().send('DEL', [chatKey(m.chatId)]);
   for (const session of new Set([...ms.map((x) => x.session), ...alsoNotify])) send(publish, `session:${session}`, { op: 'groupCallEnded', callId, chatId: m.chatId });
   await roomService('DeleteRoom', callId, {});
   const duration = Math.max(0, Math.round((Date.now() - m.startedAt) / 1000));
   await sql.begin(async (tx) => {
     await tx`update group_calls set ended_at = now(), duration = ${duration} where id = ${callId} and ended_at is null`;
+    if (!m.chatId) return;   // конференция: истории в чате нет — она в списке «Звонки»
     await serviceMessage(tx, m.chatId, m.startedBy, 'group_call', { groupCall: { callId, state: 'ended', duration } }, '', 'group');
     await chatEvent(tx, m.chatId, { type: 'groupCall', chatId: m.chatId, call: null }, 'group');
   });
@@ -440,4 +463,111 @@ export async function planReminders(planId: string): Promise<{ chatId: number; t
 export async function expireGroupCallPlan(planId: string): Promise<void> {
   const [p] = await sql`delete from group_call_plans where id = ${planId} returning chat_id`;
   if (p) await summarize(Number(p.chat_id), (await valkey().send('GET', [chatKey(Number(p.chat_id))])) as string | null);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Звонок без группы и ссылки (этап 8 docs/plans/2026-11-07-relay-calls-features.md)
+
+const sha = (t: string) => createHash('sha256').update(t).digest('base64url');
+const LINKS_PER_MIN = 10;
+
+/** Позвать в звонок: только тех, кому можно звонить мне (правило «Кто может мне звонить», блокировка — тоже).
+ *  Офлайн — пуш «… зовёт в звонок». Возвращает, кого позвали. */
+async function inviteUsers(publish: Publish, callId: string, from: number, users: number[], fromCall?: string): Promise<number[]> {
+  const others = users.filter((u) => u !== from);
+  if (!others.length) return [];
+  const ctx = await privacyCtx(sql, others.map((u) => [from, u] as [number, number]));
+  const ok = (await sql`select id from users where id = any(${others}::bigint[]) and not system`).map((r) => Number(r.id)).filter((u) => canSee(from, u, 'calls', ctx));
+  if (!ok.length) return [];
+  await valkey().send('SADD', [allowKey(callId), ...ok.map(String)]);
+  await valkey().send('EXPIRE', [allowKey(callId), String(TTL)]);
+  const count = (await members(callId)).length;
+  for (const u of ok) send(publish, `user:${u}`, { op: 'groupCallInvited', callId, from, count, ...(fromCall ? { fromCall } : {}) });
+  const online = await onlineUsers(ok);
+  const off = ok.filter((u) => !online.has(u));
+  if (off.length) await enqueue(sql, 'push.gcallInvite', { callId, from, users: off }, { dedupeKey: `push.gcallInvite:${callId}:${off.join(',')}` });
+  return ok;
+}
+
+/** Звонок без группы: создатель — я; позванные — сразу в допущенных. Из разговора 1:1 (fromCall) собеседник
+ *  обязателен: его клиент войдёт сам и только после этого разговор 1:1 закончится. */
+export async function startConference(publish: Publish, userId: number, f: { invite: number[]; fromCall?: string }): Promise<{ callId: string }> {
+  if ((await hit(`gcallstart:${userId}`, 60)) > 5) throw new DomainError('flood', 'calls', 60);
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  await valkey().send('HSET', [callKey(id), 'chatId', '0', 'epoch', '0', 'startedBy', String(userId), 'startedAt', String(now)]);
+  await valkey().send('EXPIRE', [callKey(id), String(TTL)]);
+  await sql`insert into group_calls (id, chat_id, started_by, started_at, kind) values (${id}, null, ${userId}, to_timestamp(${now / 1000}), 'conference')`;
+  await enqueue(sql, 'groupcall.check', { callId: id }, { runAt: new Date(now + CHECK_MS * 2), dedupeKey: `gcall:${id}:check` });
+  await inviteUsers(publish, id, userId, f.invite, f.fromCall);
+  return { callId: id };
+}
+
+/** Позвать ещё: участник конференции (в звонке группы — участники и так видят плашку; посторонних — ссылкой). */
+export async function inviteToCall(publish: Publish, userId: number, f: { callId: string; users: number[] }): Promise<{ invited: number[] }> {
+  const m = await meta(f.callId);
+  if (!m) throw new DomainError('not_found', 'call');
+  if (m.chatId) throw new DomainError('bad_frame', 'group call');
+  if (!(await members(f.callId)).some((x) => x.userId === userId)) throw new DomainError('forbidden', 'call');
+  return { invited: await inviteUsers(publish, f.callId, userId, f.users) };
+}
+
+/** Ссылка-приглашение: в конференцию — любой участник; в звонок группы (для тех, кто не в ней) — админ с правом calls.
+ *  revoke — отозвать все ссылки звонка. Токен — 128 бит, хранится хэш. */
+export async function callLink(userId: number, f: { callId: string; approval: boolean; revoke?: boolean }): Promise<{ token?: string; ok: true }> {
+  const m = await meta(f.callId);
+  if (!m) throw new DomainError('not_found', 'call');
+  const access = await callAccess(m, f.callId, userId);
+  if (m.chatId ? !access.admin : !(await members(f.callId)).some((x) => x.userId === userId) && !access.admin) throw new DomainError('forbidden', 'calls');
+  if (f.revoke) { await sql`update group_call_links set revoked_at = now() where call_id = ${f.callId} and revoked_at is null`; return { ok: true }; }
+  if ((await hit(`gcalllink:${userId}`, 60)) > LINKS_PER_MIN) throw new DomainError('flood', 'calls', 60);
+  const token = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url');
+  await sql`insert into group_call_links (token_hash, call_id, created_by, approval) values (${sha(token)}, ${f.callId}, ${userId}, ${f.approval})`;
+  return { token, ok: true };
+}
+
+async function linkOf(token: string): Promise<{ callId: string; approval: boolean; m: NonNullable<Awaited<ReturnType<typeof meta>>> }> {
+  const [l] = await sql`select call_id, approval from group_call_links where token_hash = ${sha(token)} and revoked_at is null`;
+  const m = l ? await meta(l.call_id as string) : null;
+  if (!l || !m) throw new DomainError('not_found', 'link');   // отозвана, звонок кончился или ссылки не было
+  return { callId: l.call_id as string, approval: l.approval === true, m };
+}
+
+export async function previewCallLink(userId: number, token: string): Promise<GroupCallLinkPreview> {
+  if ((await hit(`gcallpeek:${userId}`, 60)) > 30) throw new DomainError('flood', 'link', 60);
+  const { callId, approval, m } = await linkOf(token);
+  const ms = await members(callId);
+  let member = false;
+  try { await callAccess(m, callId, userId); member = true; } catch { /* по ссылке */ }
+  const [c] = m.chatId ? await sql`select title from chats where id = ${m.chatId}` : [];
+  return { callId, chatId: m.chatId, chatTitle: (c?.title as string | undefined) ?? null, title: m.title, count: ms.length, faces: [...new Set(ms.map((x) => x.userId))].slice(0, GROUP_CALL_FACES), approval: approval && !member, member };
+}
+
+/** Войти по ссылке: без одобрения — сразу в допущенные; с одобрением — заявка, участники видят её в составе. */
+export async function joinByCallLink(publish: Publish, userId: number, token: string): Promise<{ callId: string; chatId: number } | { pending: true }> {
+  if ((await hit(`gcallpeek:${userId}`, 60)) > 30) throw new DomainError('flood', 'link', 60);
+  const { callId, approval, m } = await linkOf(token);
+  try { await callAccess(m, callId, userId); return { callId, chatId: m.chatId }; } catch { /* не участник — по ссылке */ }
+  if (!approval) {
+    await valkey().send('SADD', [allowKey(callId), String(userId)]);
+    await valkey().send('EXPIRE', [allowKey(callId), String(TTL)]);
+    return { callId, chatId: m.chatId };
+  }
+  await valkey().send('SADD', [reqKey(callId), String(userId)]);
+  await valkey().send('EXPIRE', [reqKey(callId), String(TTL)]);
+  await broadcast(publish, callId, m.chatId, m.epoch);
+  return { pending: true };
+}
+
+/** Заявка по ссылке: пустить или отказать (админ звонка группы с правом calls, в конференции — создатель). */
+export async function decideCallRequest(publish: Publish, userId: number, f: { callId: string; userId: number; approve: boolean }): Promise<{ ok: true }> {
+  const { m } = await adminCtx(userId, f.callId);
+  if (!Number(await valkey().send('SREM', [reqKey(f.callId), String(f.userId)]))) return { ok: true };
+  if (f.approve) {
+    await valkey().send('SADD', [allowKey(f.callId), String(f.userId)]);
+    await valkey().send('EXPIRE', [allowKey(f.callId), String(TTL)]);
+    send(publish, `user:${f.userId}`, { op: 'groupCallApproved', callId: f.callId, chatId: m.chatId });
+  } else send(publish, `user:${f.userId}`, { op: 'groupCallRefused', callId: f.callId });
+  await broadcast(publish, f.callId, m.chatId, m.epoch);
+  return { ok: true };
 }

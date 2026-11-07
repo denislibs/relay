@@ -11,6 +11,7 @@ import { nameForSql } from './profile';
 export type CallRow = {
   id: number; chatId: number; peerId: number; name: string; photo: ProfilePhoto | null;
   outgoing: boolean; video: boolean; reason: CallEndReason; duration?: number; at: string;
+  conference?: { callId: string; names: string[]; count: number };   // звонок без группы: чата нет, строка — кто был
 };
 
 /** Пропущенный глазами адресата: не ответил, звонящий сбросил, пока звонило, или был занят. */
@@ -45,7 +46,25 @@ export async function listCalls(userId: number, o: { before?: { at: string; id: 
       ...(d.duration != null ? { duration: d.duration } : {}), at: new Date(r.created_at as string).toISOString(),
     };
   });
-  return { calls, more: rows.length > PAGE };
+  // звонки без группы, где я был (во «Все»; пропущенных у них нет) — сливаются с личными по времени
+  const conf = o.missed ? [] : await sql`
+    select gc.id, gc.started_by, gc.started_at, gc.duration,
+           (select count(*)::int from group_call_members x where x.call_id = gc.id) as count,
+           (select array_agg(n) from (select ${nameForSql(userId)} as n from group_call_members x join users u on u.id = x.user_id
+              where x.call_id = gc.id and x.user_id <> ${userId} order by x.joined_at limit 3) t) as names
+      from group_call_members me
+      join group_calls gc on gc.id = me.call_id and gc.kind = 'conference' and gc.ended_at is not null
+     where me.user_id = ${userId}
+       ${before ? sql`and gc.started_at < ${before.at}::timestamptz` : sql``}
+     order by gc.started_at desc
+     limit ${PAGE + 1}`;
+  const confRows = conf.map((r): CallRow => ({
+    id: 0, chatId: 0, peerId: Number(r.started_by ?? 0), name: ((r.names as string[] | null) ?? []).join(', '), photo: null,
+    outgoing: Number(r.started_by) === userId, video: false, reason: 'ended', ...(r.duration != null ? { duration: Number(r.duration) } : {}),
+    at: new Date(r.started_at as string).toISOString(), conference: { callId: r.id as string, names: (r.names as string[] | null) ?? [], count: Number(r.count) },
+  }));
+  const all = [...calls, ...confRows].sort((p, q) => (p.at < q.at ? 1 : p.at > q.at ? -1 : q.id - p.id));
+  return { calls: all.slice(0, PAGE), more: rows.length > PAGE || conf.length > PAGE || all.length > PAGE };
 }
 
 /** Новые пропущенные (бейдж «Звонки»): входящие без ответа новее отметки «видел список». Не больше 99. */

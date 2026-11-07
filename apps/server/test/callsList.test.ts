@@ -66,3 +66,14 @@ test('cleared history and deleted lines are not in the list; strangers see nothi
   expect((await get(b, '/calls')).calls).toEqual([]);
   expect((await get(x, '/calls')).calls).toEqual([]);
 });
+
+test('conferences I was in show up in «Все» with who was there; not in «Пропущенные»', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const id = crypto.randomUUID();
+  await sql`insert into group_calls (id, chat_id, started_by, started_at, ended_at, duration, kind) values (${id}, null, ${a.userId}, now() - interval '1 minute', now(), 42, 'conference')`;
+  await sql`insert into group_call_members (call_id, user_id) values (${id}, ${a.userId}), (${id}, ${b.userId}), (${id}, ${c.userId})`;
+  const list = await get(b, '/calls');
+  expect(list.calls[0]).toMatchObject({ chatId: 0, outgoing: false, duration: 42, conference: { callId: id, count: 3 } });
+  expect(list.calls[0].conference.names.sort()).toEqual(['Анна', 'Вера']);
+  expect((await get(b, '/calls?missed=1')).calls).toEqual([]);
+});

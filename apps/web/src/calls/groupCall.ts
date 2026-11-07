@@ -2,13 +2,14 @@ import { GROUP_CALL_PING_MS, type GroupCallMember } from '@relay/protocol';
 import type { CallEvent } from '@relay/sync-engine/src/engine';
 import { asset } from '../assets';
 import { getGlobal, setGlobal } from '../global';
+import { activeCallId, finishMove, prepareMove } from './callController';
 import { getPrefs, setPref } from '../prefs';
 import { ephemeral, type Ephemeral } from './callCrypto';
 import { dataEpoch, membersEmoji, openData, openSenderKey, sealData, sealSenderKey, senderKey } from './groupCrypto';
 import { audioConstraints, failureOf, videoConstraints } from './media';
 import { blurProcessor } from './background';
 import type { NetLevel } from './quality';
-import { sounds } from './sounds';
+import { soundSink, sounds } from './sounds';
 
 /**
  * Групповой звонок на странице (docs/plans/2026-11-07-relay-group-calls.md). Медиа — комната LiveKit (livekit-client,
@@ -35,6 +36,7 @@ export interface GroupCallView {
   rev: number;   // дорожки поменялись — перерисовать видео
   joinMuted: boolean;                 // админ: новые участники — без микрофона
   title: string | null;               // название звонка (из плана или задал админ)
+  requests: { id: number; name: string }[];   // хотят войти по ссылке (вход по одобрению)
   reactions: GroupReaction[];         // летящие реакции (живут REACTION_MS)
   chat: GroupChatLine[];              // чат звонка: только пока идёт звонок, не сохраняется
   chatUnread: number;
@@ -105,6 +107,109 @@ export function bindGroupCalls(opts: { userId: number; send: Send; onCall: (cb: 
   toast = opts.toast;
   opts.onCall((f) => { void onEvent(f).catch((e) => console.warn('group call:', e)); });
   addEventListener('pagehide', () => { if (cur && !cur.ended) void send({ op: 'groupCallLeave', callId: cur.view.callId }).catch(() => {}); });
+  // вкладку открыли ссылкой на звонок (#calllink=…) или из уведомления «зовёт в звонок» (#gcall=…[&accept=1]);
+  // в уже открытой вкладке — та же ссылка сменой адреса
+  callHash(location.hash);
+  addEventListener('hashchange', (e) => callHash(new URL((e as HashChangeEvent).newURL).hash), { capture: true });   // адрес из события: другие обработчики могут его уже переписать
+}
+
+function callHash(hash: string): void {
+  const h = new URLSearchParams(hash.replace(/^#/, ''));
+  const link = h.get('calllink'), inv = h.get('gcall');
+  if (!link && !inv) return;
+  if (/calllink=|gcall=/.test(location.hash)) history.replaceState(history.state, '', location.pathname + location.search);
+  if (link && /^[A-Za-z0-9_-]{22}$/.test(link)) void openCallLink(link);
+  else if (inv && /^[0-9a-f-]{36}$/.test(inv)) {
+    if (h.get('accept') === '1') void joinGroupCall(0, inv); else setGlobal({ groupInvite: { callId: inv, from: 0, count: 0 } });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Звонок без группы, приглашения и ссылки (этап 8 docs/plans/2026-11-07-relay-calls-features.md)
+
+/** Звонок без группы; из разговора 1:1 (fromCall) — собеседник войдёт сам, разговор продолжится в групповом. */
+export async function startConference(invite: number[], fromCall?: string): Promise<void> {
+  let r: { callId: string };
+  try { r = await send({ op: 'groupCallConference', invite, ...(fromCall ? { fromCall } : {}) }) as { callId: string }; }
+  catch { toast('Не удалось начать групповой звонок'); return; }
+  await joinGroupCall(0, r.callId, { moving: !!fromCall });
+}
+
+/** Позвать ещё людей в звонок без группы. */
+export async function inviteToGroupCall(users: number[]): Promise<void> {
+  const a = cur;
+  if (!a || !users.length) return;
+  try {
+    const r = await send({ op: 'groupCallInvite', callId: a.view.callId, users }) as { invited: number[] };
+    toast(r.invited.length === users.length ? 'Приглашения отправлены' : r.invited.length ? 'Позвали не всех: кто-то не принимает звонки' : 'Этим людям нельзя позвонить');
+  } catch { toast('Не удалось позвать'); }
+}
+
+/** Принять или отклонить приглашение в звонок без группы. */
+export function answerGroupInvite(accept: boolean): void {
+  const inv = getGlobal().groupInvite;
+  sounds.stop();
+  setGlobal({ groupInvite: null });
+  if (inv && accept) void joinGroupCall(0, inv.callId);
+}
+
+let inviteTimer: ReturnType<typeof setTimeout> | null = null;
+function showInvite(f: { callId: string; from: number; count: number; fromCall?: string }): void {
+  // зовут из моего же разговора 1:1 — переходим сами, без вопроса
+  if (f.fromCall && activeCallId() === f.fromCall) { void joinGroupCall(0, f.callId, { moving: true }); return; }
+  if (cur && !cur.ended) return;   // уже в групповом — не мешаем
+  setGlobal({ groupInvite: { callId: f.callId, from: f.from, count: f.count } });
+  if (document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted' && navigator.serviceWorker) {
+    void navigator.serviceWorker.ready.then((reg) => reg.showNotification('Групповой звонок', { body: 'Вас зовут в звонок', tag: 'gcall-' + f.callId, data: { gcallId: f.callId },
+      actions: [{ action: 'accept', title: 'Принять' }, { action: 'decline', title: 'Отклонить' }] } as NotificationOptions)).catch(() => {});
+  }
+  const p = getPrefs().calls;
+  void soundSink(p.speaker).then(() => sounds.ringtone(p.ringtone, p.volume));
+  if (inviteTimer) clearTimeout(inviteTimer);
+  inviteTimer = setTimeout(() => { if (getGlobal().groupInvite?.callId === f.callId) answerGroupInvite(false); }, 45_000);
+}
+
+/** Ссылка на звонок: что за звонок (до входа). */
+export async function openCallLink(token: string): Promise<void> {
+  setGlobal({ callLink: { token, preview: null, pending: false, failed: false } });
+  try {
+    const preview = await send({ op: 'groupCallLinkPreview', token }) as import('@relay/protocol').GroupCallLinkPreview;
+    if (getGlobal().callLink?.token === token) setGlobal({ callLink: { token, preview, pending: false, failed: false } });
+  } catch { if (getGlobal().callLink?.token === token) setGlobal({ callLink: { token, preview: null, pending: false, failed: true } }); }
+}
+
+export async function joinByLink(): Promise<void> {
+  const l = getGlobal().callLink;
+  if (!l) return;
+  try {
+    const r = await send({ op: 'groupCallLinkJoin', token: l.token }) as { callId: string; chatId: number } | { pending: true };
+    if ('pending' in r) { setGlobal({ callLink: { ...l, pending: true } }); return; }
+    await joinGroupCall(r.chatId, r.callId);
+  } catch { setGlobal({ callLink: { ...l, failed: true } }); }
+}
+
+/** Ссылка-приглашение в текущий звонок (адрес целиком); revoke — отозвать все. */
+export async function callLinkUrl(approval: boolean): Promise<string | null> {
+  const a = cur;
+  if (!a) return null;
+  try {
+    const r = await send({ op: 'groupCallLink', callId: a.view.callId, approval }) as { token: string };
+    return `${location.origin}/#calllink=${r.token}`;
+  } catch { toast('Ссылку может создать только администратор звонка'); return null; }
+}
+export async function revokeCallLinks(): Promise<void> {
+  const a = cur;
+  if (!a) return;
+  try { await send({ op: 'groupCallLink', callId: a.view.callId, approval: false, revoke: true }); toast('Ссылки на звонок отозваны'); }
+  catch { toast('Не удалось отозвать ссылки'); }
+}
+
+/** Заявка по ссылке: пустить или нет. */
+export async function decideRequest(userId: number, approve: boolean): Promise<void> {
+  const a = cur;
+  if (!a) return;
+  try { await send({ op: 'groupCallDecide', callId: a.view.callId, userId, approve }); }
+  catch { toast('Решать может администратор звонка'); }
 }
 
 /** Начать звонок в группе (или войти в идущий). */
@@ -116,10 +221,15 @@ export async function startGroupCall(chatId: number): Promise<void> {
 }
 
 /** Войти в идущий звонок группы. */
-export async function joinGroupCall(chatId: number, callId: string): Promise<void> {
+export async function joinGroupCall(chatId: number, callId: string, o: { moving?: boolean } = {}): Promise<void> {
   if (cur && !cur.ended) { if (cur.view.callId === callId) setGlobal({ groupCallMin: false }); return; }
-  if (getGlobal().call) { toast('Сначала завершите текущий звонок'); return; }
-  const release = await takeLock('relay-call');
+  // из разговора 1:1 — в групповой: замок звонка отдаёт 1:1, само соединение закроется, когда подключимся (finishMove)
+  const moving = !!o.moving && prepareMove();
+  if (getGlobal().call && !moving) { toast('Сначала завершите текущий звонок'); return; }
+  setGlobal({ groupInvite: null, callLink: null });
+  let release = await takeLock('relay-call');
+  // из 1:1: его замок только что отпущен — освобождение асинхронное, ждём немного
+  for (let i = 0; !release && moving && i < 20; i++) { await new Promise((r) => setTimeout(r, 50)); release = await takeLock('relay-call'); }
   if (!release) { toast('Вы уже в звонке в другой вкладке'); return; }
   const p = getPrefs().calls;
   // микрофон — сразу (и проверка разрешения); дальше его публикует LiveKit с теми же настройками
@@ -141,7 +251,7 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
     videoCaptureDefaults: { resolution: lk.VideoPresets.h720.resolution },
   });
   const a: Active = {
-    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0, joinMuted: false, reactions: [], chat: [], chatUnread: 0, title: null },
+    view: { callId, chatId, phase: 'joining', epoch: j.epoch, members: [], emoji: null, mic: true, cam: false, screen: false, hand: false, mutedByAdmin: false, startedBy: null, reason: null, rev: 0, joinMuted: false, reactions: [], chat: [], chatUnread: 0, title: null, requests: [] },
     mine, session, identity: j.identity, lk, room, keys, myKeys: new Map(), sent: new Set(), pending: new Map(), ping: null, releaseLock: release, ended: false, audios: new Map(),
     raw: new Map(), sentAt: [],
   };
@@ -168,7 +278,7 @@ export async function joinGroupCall(chatId: number, callId: string): Promise<voi
     return finish(a, 'failed');
   }
   view({ phase: 'active' });
-  sounds.connected(p.volume);
+  if (moving) finishMove(); else sounds.connected(p.volume);
   a.ping = setInterval(() => void send({ op: 'groupCallPing', callId }).catch(() => {}), GROUP_CALL_PING_MS);
 }
 
@@ -313,10 +423,13 @@ function wireRoom(a: Active): void {
 async function onEvent(f: CallEvent): Promise<void> {
   const a = cur;
   if (f.op === 'callResync') { if (a && !a.ended) await rejoin(a); return; }
+  if (f.op === 'groupCallInvited') { showInvite(f); return; }
+  if (f.op === 'groupCallApproved') { if (getGlobal().callLink?.preview?.callId === f.callId) await joinGroupCall(f.chatId, f.callId); return; }
+  if (f.op === 'groupCallRefused') { const l = getGlobal().callLink; if (l?.preview?.callId === f.callId) { setGlobal({ callLink: null }); toast('Вас не пустили в звонок'); } return; }
   if (!a && joining && 'callId' in f && f.callId === joining.callId) { if (joining.early.length < 64) joining.early.push(f); return; }
   if (!a || a.ended || !('callId' in f) || f.callId !== a.view.callId) return;
   switch (f.op) {
-    case 'groupCallState': view({ joinMuted: f.joinMuted === true, title: f.title ?? null }); return onState(a, f.epoch, f.members);
+    case 'groupCallState': view({ joinMuted: f.joinMuted === true, title: f.title ?? null, requests: f.requests ?? [], ...(f.startedBy ? { startedBy: f.startedBy } : {}) }); return onState(a, f.epoch, f.members);
     case 'groupCallKeys': return onKeys(a, f);
     case 'groupCallEnded': return finish(a, 'ended');
     case 'groupCallMuted':

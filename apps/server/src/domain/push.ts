@@ -103,7 +103,7 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 /** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
 /** call — звонок (push.call): SW показывает уведомление с «Принять / Отклонить» или закрывает его (end). */
 export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true; call?: CallPushInfo };
-export type CallPushInfo = { id: string; video?: true; end?: true; missed?: true };
+export type CallPushInfo = { id: string; video?: true; end?: true; missed?: true; group?: true };   // group — зовут в звонок без группы
 
 /** Звонок 1:1 → пуш адресату: его подписки живых сеансов (кто может звонить — уже проверено запросом звонка).
  *  Заглушённый чат звонит всё равно (как в Telegram); «скрывать текст» — без имени. Онлайн проверяет вызывающий. */
@@ -255,4 +255,19 @@ export async function planReminderPush(chatId: number, users: number[], callTitl
        and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))`;
   const body = callTitle ? `Начинается звонок «${callTitle}»` : 'Начинается звонок';
   return rows.map((s) => ({ endpoint: s.endpoint as string, push: s.hide_text === true ? { chatId, id: 0, title: 'Relay', body: 'Начинается звонок' } : { chatId, id: 0, title: String(c?.title ?? 'Группа'), body } }));
+}
+
+/** Зовут в звонок без группы (groupCalls.ts inviteUsers): подписки позванных без живых вкладок. */
+export async function planInvitePush(callId: string, from: number, users: number[]): Promise<{ endpoint: string; push: PushPayload }[]> {
+  if (!users.length) return [];
+  const rows = await sql`
+    select s.endpoint, s.hide_text, s.user_id,
+           (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${from}) as from_name
+      from push_subscriptions s
+      join sessions se on se.id = s.session_id
+      left join user_settings us on us.user_id = s.user_id
+     where s.user_id = any(${users}::bigint[]) and se.expires_at > now()
+       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
+       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${from})`;
+  return rows.map((s) => ({ endpoint: s.endpoint as string, push: { chatId: 0, id: 0, title: s.hide_text === true ? 'Relay' : String(s.from_name ?? ''), body: 'Зовёт в групповой звонок', call: { id: callId, group: true } } }));
 }

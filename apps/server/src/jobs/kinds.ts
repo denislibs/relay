@@ -4,7 +4,7 @@ import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
-import { deliverPush, planCallPush, planPush, planPushPage, planReminderPush, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
+import { deliverPush, planCallPush, planInvitePush, planPush, planPushPage, planReminderPush, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
@@ -280,6 +280,12 @@ register('groupcall.remind', async (p: { planId: string }) => {
   const targets = await planReminderPush(r.chatId, r.users, r.title);
   const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, 3600)));
   for (const x of res) if (x.status === 'rejected') console.warn('groupcall.remind:', x.reason);
+});
+// зовут в звонок без группы: пуш тем, у кого нет вкладок (живёт, пока звонок свежий — час)
+register('push.gcallInvite', async (p: { callId: string; from: number; users: number[] }) => {
+  const targets = await planInvitePush(String(p.callId), Number(p.from), (p.users ?? []).map(Number));
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, 600)));
+  for (const x of res) if (x.status === 'rejected') console.warn('push.gcallInvite:', x.reason);
 });
 register('groupcall.planExpire', async (p: { planId: string }) => expireGroupCallPlan(String(p.planId)));
 

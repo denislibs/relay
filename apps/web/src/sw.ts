@@ -180,7 +180,7 @@ sw.addEventListener('fetch', (e) => {
 const SYSTEM_ICON = '/relay-logo-192.png';
 
 // Web Push: сервер шлёт, когда у пользователя нет ни одной живой вкладки. Окно в фокусе — не мешаем.
-type CallPush = { id: string; video?: boolean; end?: boolean; missed?: boolean };
+type CallPush = { id: string; video?: boolean; end?: boolean; missed?: boolean; group?: boolean };
 sw.addEventListener('push', (e) => {
   const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string; system?: boolean; call?: CallPush }; } catch { return null; } })();
   if (!d) return;
@@ -197,6 +197,12 @@ sw.addEventListener('push', (e) => {
 // звонок 1:1, вкладок нет (сервер шлёт только тогда): уведомление «Принять / Отклонить» висит, пока звонят;
 // конец звонка закрывает его, не ответил — «Пропущенный звонок» (calls.ts на сервере, push.call)
 async function callPush(d: { chatId: number; title: string; body: string; call: CallPush }): Promise<void> {
+  // зовут в звонок без группы: «Принять» откроет вкладку сразу в звонке
+  if (d.call.group) {
+    await sw.registration.showNotification(d.title, { body: d.body, tag: 'gcall-' + d.call.id, data: { gcallId: d.call.id },
+      actions: [{ action: 'accept', title: 'Принять' }, { action: 'decline', title: 'Отклонить' }] } as NotificationOptions);
+    return;
+  }
   const tag = 'call-' + d.call.id;
   if (d.call.end) {
     for (const n of await sw.registration.getNotifications({ tag })) n.close();
@@ -215,6 +221,17 @@ sw.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const callId = typeof e.notification.data?.callId === 'string' ? e.notification.data.callId as string : null;
   if (callId) { e.waitUntil(callClick(callId, e.action)); return; }
+  const gcallId = typeof e.notification.data?.gcallId === 'string' ? e.notification.data.gcallId as string : null;
+  if (gcallId) {
+    if (e.action === 'decline') return;
+    e.waitUntil((async () => {
+      const accept = e.action === 'accept';
+      const win = (await sw.clients.matchAll({ type: 'window', includeUncontrolled: true }))[0] as WindowClient | undefined;
+      if (win) { await win.focus(); win.postMessage({ type: 'gcall', callId: gcallId, accept }); }
+      else await sw.clients.openWindow('/#gcall=' + gcallId + (accept ? '&accept=1' : ''));
+    })());
+    return;
+  }
   const chatId = Number(e.notification.data?.chatId) || null;
   const threadId = Number(e.notification.data?.threadId) || null;   // комментарий в треде — открыть тред
   e.waitUntil((async () => {

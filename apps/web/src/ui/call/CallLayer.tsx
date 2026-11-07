@@ -5,6 +5,8 @@ import { callStatus } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
 import { CallPlate, useNow, usePeer } from './CallSlot';
 import { openCallPip, useAutoPip } from './CallPip';
+import { PeoplePicker } from './PeoplePicker';
+import { startConference } from '../../calls/groupCall';
 import { pipKind } from '../../calls/pip';
 
 /**
@@ -47,6 +49,7 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
   const showRemote = v.peerCam && !v.inPaused && (v.phase === 'active' || v.phase === 'reconnecting');
   const live = v.phase === 'active';
   const [emojiHint, setEmojiHint] = useState(false);
+  const [adding, setAdding] = useState(false);   // «Добавить участника»: разговор продолжится групповым звонком
   return (
     <div class={'app-call' + (showRemote ? ' app-call-video' : '') + (ended ? ' app-call-ended' : '')} role="dialog" aria-label={incoming ? 'Входящий звонок' : 'Звонок'} data-phase={v.phase}>
       <video ref={remoteVideo} class="app-call-remote" autoplay playsInline muted aria-hidden="true" />
@@ -90,10 +93,13 @@ function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
             {v.cam ? <CallButton icon="blur" label={bg === 'blur' ? 'Обычный фон' : 'Размыть фон'} on={bg === 'blur'} disabled={ended} onClick={() => void setCallBackground(bg === 'blur' ? 'none' : 'blur')} /> : null}
             <CallButton icon={v.cam ? 'video' : 'videoOff'} label={v.cam ? 'Выключить камеру' : 'Включить камеру'} on={v.cam} disabled={ended} onClick={() => void toggleCam()} />
             <CallButton icon={v.mic ? 'mic' : 'micOff'} label={v.mic ? 'Выключить микрофон' : 'Включить микрофон'} on={v.mic} disabled={ended} onClick={toggleMic} />
+            {v.phase === 'active' ? <CallButton icon="userPlus" label="Добавить" onClick={() => setAdding(true)} /> : null}
             <CallButton icon="phoneDown" label="Завершить" danger disabled={ended} onClick={hangup} />
           </>
         )}
       </div>
+      {adding ? <PeoplePicker title="Добавить в звонок" action="Позвать" exclude={[v.peerId]} onClose={() => setAdding(false)}
+        onPick={(ids) => { setAdding(false); void startConference([v.peerId, ...ids], v.callId); }} /> : null}
     </div>
   );
 }

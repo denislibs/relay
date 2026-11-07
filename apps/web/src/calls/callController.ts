@@ -81,6 +81,7 @@ interface Active {
   reconnectSince: number | null;
   ended: boolean;
   rung: boolean;               // адресату уже звонит (кадр мог прийти раньше ответа на запрос)
+  moving?: boolean;            // разговор переходит в групповой: закончится тихо, без экрана «завершён»
 }
 
 type Send = (frame: Record<string, unknown> & { op: string }) => Promise<unknown>;
@@ -256,6 +257,28 @@ export function hangup(): void {
   const ringing = a.view.phase === 'requesting' || a.view.phase === 'calling' || a.view.phase === 'ringing';
   void send(ringing ? { op: 'callDecline', callId: a.view.callId } : { op: 'callHangup', callId: a.view.callId }).catch(() => {});
   finish(a, ringing ? 'cancelled' : 'ended', true);
+}
+
+/** Разговор 1:1, который идёт сейчас (для «Добавить участника» и перехода собеседника в групповой). */
+export const activeCallId = (): string | null => (cur && !cur.ended && cur.view.phase === 'active' ? cur.view.callId : null);
+
+/**
+ * Переход в групповой звонок (этап 8): Web Lock отдаём групповому, прямое соединение пока живёт — собеседник
+ * слышен, пока оба не подключатся к групповому; потом finishMove закрывает его тихо.
+ */
+export function prepareMove(): boolean {
+  const a = cur;
+  if (!a || a.ended) return false;
+  a.moving = true;
+  a.releaseLock?.();
+  a.releaseLock = null;
+  return true;
+}
+export function finishMove(): void {
+  const a = cur;
+  if (!a || a.ended || !a.moving) return;
+  void send({ op: 'callHangup', callId: a.view.callId }).catch(() => {});
+  finish(a, 'ended', false);
 }
 
 export function toggleMic(): void {
@@ -647,10 +670,11 @@ function finish(a: Active, reason: CallFailure, sound: boolean, duration?: numbe
   stopStream(a.local);
   if (a.audio) { a.audio.pause(); a.audio.srcObject = null; }
   sounds.stop();
-  if (sound && (reason === 'failed' || reason === 'security')) sounds.failed(vol());
-  else if (sound) sounds.ended(vol());
+  if (sound && !a.moving && (reason === 'failed' || reason === 'security')) sounds.failed(vol());
+  else if (sound && !a.moving) sounds.ended(vol());
   a.releaseLock?.();
   a.releaseLock = null;
+  if (a.moving) { cur = null; setGlobal({ call: null, callMin: false }); return; }   // ушли в групповой — он уже на экране
   const dur = duration ?? (a.view.startedAt ? Math.round((Date.now() - a.view.startedAt) / 1000) : undefined);
   view({ phase: 'ended', reason, duration: dur, rev: a.view.rev + 1 });
   setGlobal({ callMin: false });   // свёрнутый — разворачивается, чтобы было видно, чем кончился
