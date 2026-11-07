@@ -100,6 +100,15 @@ test('my stickers: defaults once, install on top, uninstall, journal on every ch
   await expect(setInstalled(u, 999999, true)).rejects.toMatchObject({ code: 'not_found' });
 });
 
+test('my stickers on an empty catalog: no packs and no "defaults given" mark — they come once the assets are imported', async () => {
+  await sql`truncate sticker_sets restart identity cascade`;
+  const uid = await makeUser('early');
+  expect((await myStickers(uid)).sets).toEqual([]);
+  expect(await sql`select 1 from user_sticker_init where user_id = ${uid}`).toHaveLength(0);
+  await importStickers();
+  expect((await myStickers(uid)).sets.map((x) => x.title)).toEqual(['Duck', 'Chilled Cat']);
+});
+
 test('recent (20) and faved (5) are capped, newest first; search by title and emoji', async () => {
   const a = await makeUser('Анна'), b = await makeUser('Борис');
   const chat = await makeChat([a, b]);
