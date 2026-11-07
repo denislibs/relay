@@ -7,11 +7,11 @@
 #                     server и worker (:9091, внутренний порт, мимо nginx), coturn (:9641), LiveKit (:6789),
 #                     node-exporter (диски, память хоста), cadvisor (память и CPU контейнеров);
 #   vmalert         — правила тревог (deploy/observability/vmalert/alerts.yml) → alertmanager → бот Telegram
-#                     (тот же бот и чат, что у доставки кодов: секрет telegram_bot_token, TELEGRAM_OWNER_CHAT_ID);
+#                     (свой бот, не тот, что шлёт коды входа: секрет alert_bot_token; чат — TELEGRAM_OWNER_CHAT_ID);
 #   grafana         — панель «Relay» по сборкам; только 127.0.0.1:3001 — открывать через ssh -L, наружу не публикуется.
 #
 # Наружу не опубликовано ничего; все сервисы — с пределом памяти, вместе ≈ 600 МБ.
-# Секреты — файлами, как у остального боевого стека (docker-compose.secure.yml): secrets/run/telegram_bot_token и
+# Секреты — файлами, как у остального боевого стека (docker-compose.secure.yml): secrets/run/alert_bot_token и
 # secrets/run/grafana_admin_password (deploy/make-secrets.sh), в окружении и аргументах их нет. Процессы здесь не
 # root — им добавлена группа 1000, которой открыты файлы секретов (640).
 # На боевом сервере слой подключает deploy/lib.sh, если в .env RELAY_OBSERVABILITY=1.
@@ -70,13 +70,14 @@ services:
     command:
       - |
         set -eu
+        [ -s /run/secrets/alert_bot_token ] || { echo "secrets/run/alert_bot_token is empty (deploy/set-secret.sh alert_bot_token)" >&2; exit 1; }
         case "$$TELEGRAM_OWNER_CHAT_ID" in ''|*[!0-9-]*) echo "TELEGRAM_OWNER_CHAT_ID must be a number" >&2; exit 1;; esac
         umask 077
         sed "s/__TELEGRAM_OWNER_CHAT_ID__/$$TELEGRAM_OWNER_CHAT_ID/" /etc/alertmanager/alertmanager.yml > /run/am/alertmanager.yml
         exec /bin/alertmanager --config.file=/run/am/alertmanager.yml --storage.path=/alertmanager --web.listen-address=:9093 --cluster.listen-address=
     environment:
       TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:?set TELEGRAM_OWNER_CHAT_ID}
-    secrets: [telegram_bot_token]
+    secrets: [alert_bot_token]
     group_add: ["1000"]
     volumes:
       - ./deploy/observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
@@ -155,7 +156,7 @@ services:
     depends_on: [victoriametrics]
 
 secrets:
-  telegram_bot_token: { file: ./secrets/run/telegram_bot_token }
+  alert_bot_token: { file: ./secrets/run/alert_bot_token }
   grafana_admin_password: { file: ./secrets/run/grafana_admin_password }
 
 volumes:

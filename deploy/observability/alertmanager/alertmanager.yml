@@ -1,4 +1,5 @@
-# Тревоги → владельцу в Telegram тем же ботом, что и коды входа (docs/observability.md, «Тревоги»).
+# Тревоги → владельцу в Telegram отдельным ботом, не тем, что шлёт коды входа (docs/observability.md, «Тревоги»):
+# бот кодов может упереться в дневной предел или быть заблокирован — тревога о том же должна дойти.
 # __TELEGRAM_OWNER_CHAT_ID__ и файл токена подставляет команда запуска сервиса (deploy/docker-compose.observability.yml).
 route:
   receiver: owner
@@ -16,7 +17,7 @@ inhibit_rules:
 receivers:
   - name: owner
     telegram_configs:
-      - bot_token_file: /run/secrets/telegram_bot_token
+      - bot_token_file: /run/secrets/alert_bot_token
         chat_id: __TELEGRAM_OWNER_CHAT_ID__
         parse_mode: HTML
         send_resolved: true

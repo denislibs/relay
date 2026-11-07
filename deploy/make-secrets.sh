@@ -74,6 +74,9 @@ secret telegram_bot_token empty
 secret telegram_webhook_secret hex 32
 # наблюдаемость (deploy/docker-compose.observability.yml, если RELAY_OBSERVABILITY=1): вход в Grafana
 secret grafana_admin_password alnum 32
+# тревоги alertmanager — отдельным ботом (не тем, что шлёт коды входа): токен вписывает владелец
+# (deploy/set-secret.sh alert_bot_token), нужен только при RELAY_OBSERVABILITY=1
+secret alert_bot_token empty
 
 log "secrets in $run:${made:- nothing generated (all present)}"
 
@@ -110,6 +113,9 @@ for k in RELAY_DOMAIN RELAY_TURN_EXTERNAL_IP TELEGRAM_OWNER_CHAT_ID AGE_DATA AGE
   [ -n "$(env_get "$k")" ] || missing="$missing $k"
 done
 [ -s "$run/telegram_bot_token" ] || missing="$missing secrets/run/telegram_bot_token (deploy/set-secret.sh telegram_bot_token)"
+if [ "$(env_get RELAY_OBSERVABILITY)" = 1 ] && [ ! -s "$run/alert_bot_token" ]; then
+  missing="$missing secrets/run/alert_bot_token (deploy/set-secret.sh alert_bot_token)"
+fi
 [ -z "$missing" ] || log "fill in by hand:$missing"
 n=$(secrets_unexpected)
 [ "$n" = 0 ] || log "WARNING: $n unexpected file(s) in secrets/run (names not shown — remove them; deploy.sh refuses to run)"

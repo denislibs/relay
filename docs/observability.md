@@ -12,7 +12,7 @@
 | `/metrics` — Prometheus | server и worker, `METRICS_PORT` (по умолчанию 9091) | только внутренняя сеть compose; nginx его не проксирует, порт не публикуется |
 | `POST /client-errors`, `POST /client-stats` | server :3000 (через nginx) | клиенты; лимит 20 отчётов в минуту на IP, тело ≤ 16 КБ |
 | Grafana | `127.0.0.1:3001` на сервере | владелец, через `ssh -L` |
-| Тревоги | бот Telegram (тот же, что коды входа) → `TELEGRAM_OWNER_CHAT_ID` | владелец |
+| Тревоги | свой бот Telegram (не тот, что коды входа) → `TELEGRAM_OWNER_CHAT_ID` | владелец |
 
 Сборка: `BUILD_ID` из окружения или файл `/app/BUILD_ID`, который пишет `apps/server/Dockerfile`
 (`--build-arg BUILD_ID=<git sha>`; без аргумента — время сборки). Тот же id получает клиент (`__BUILD__`), поэтому
@@ -29,10 +29,14 @@
 sudo -u deploy sed -i 's/^RELAY_OBSERVABILITY=.*/RELAY_OBSERVABILITY=1/' /opt/relay/.env && /opt/relay/deploy/compose.sh up -d
 ```
 
-Секреты — файлами, как у всего боевого стека: токен бота — `secrets/run/telegram_bot_token` (тот же, что для кодов
-входа), пароль Grafana — `secrets/run/grafana_admin_password` (создаёт `deploy/make-secrets.sh`); в `.env` —
-только `TELEGRAM_OWNER_CHAT_ID`. Локально поверх `docker-compose.yml` — те же два файла в `./secrets/run/` (тогда
-тревоги уйдут в настоящий Telegram, если токен настоящий):
+Секреты — файлами, как у всего боевого стека: токен бота тревог — `secrets/run/alert_bot_token`, пароль Grafana —
+`secrets/run/grafana_admin_password` (оба создаёт `deploy/make-secrets.sh`, первый — пустым); в `.env` — только
+`TELEGRAM_OWNER_CHAT_ID`. Бот тревог — **отдельный** от бота кодов входа: тот может упереться в дневной предел или быть
+заблокирован, а тревога об этом должна дойти. Завести: @BotFather → `/newbot`, затем написать новому боту `/start`
+(иначе он не сможет писать владельцу) и `sudo -u deploy /opt/relay/deploy/set-secret.sh alert_bot_token`; пустой
+токен при `RELAY_OBSERVABILITY=1` — `deploy.sh` не выкатывает, alertmanager не стартует. Локально поверх
+`docker-compose.yml` — те же два файла в `./secrets/run/` (тогда тревоги уйдут в настоящий Telegram, если токен
+настоящий):
 
 ```bash
 docker compose -f docker-compose.yml -f deploy/docker-compose.observability.yml --profile observability up -d
@@ -165,5 +169,5 @@ nginx или свой; тот же id — в заголовке ответа), `
 - `/client-errors` принимается без входа (ошибки экрана входа), поэтому: лимит на IP, тело ≤ 16 КБ (поток без
   `Content-Length` обрывается на пределе), ≤ 10 записей, метки только из списков, сборок клиента в метке — не
   больше 8 на процесс.
-- Grafana — только `127.0.0.1`, вход по паролю, регистрация и анонимный доступ выключены. Токен бота в
-  alertmanager — файл в tmpfs, не в конфиге и не в логах.
+- Grafana — только `127.0.0.1`, вход по паролю, регистрация и анонимный доступ выключены. Токен бота тревог в
+  alertmanager — docker secret (файл), не в конфиге и не в логах.

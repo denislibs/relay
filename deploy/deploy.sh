@@ -70,6 +70,9 @@ preflight() {
   [ -s "$SECRETS_RUN/pg_password" ] || die "$SECRETS_RUN missing: run deploy/make-secrets.sh first (docs/deploy.md)"
   [ -s "$SECRETS_RUN/telegram_bot_token" ] || die "secrets/run/telegram_bot_token is empty (docs/code-delivery.md)"
   [ -s "$SECRETS_RUN/vault_token" ] || die "secrets/run/vault_token is empty: run deploy/bao-init.sh"
+  if [ "$(env_get RELAY_OBSERVABILITY)" = 1 ]; then
+    [ -s "$SECRETS_RUN/alert_bot_token" ] || die "secrets/run/alert_bot_token is empty: deploy/set-secret.sh alert_bot_token (docs/observability.md)"
+  fi
   # посторонний файл в secrets/run — до любых изменений (имя не печатается: им может оказаться сам секрет)
   [ "$(secrets_unexpected)" = 0 ] || die "unexpected file(s) in secrets/run — names not shown; keep only: $SECRET_NAMES (deploy/set-secret.sh)"
   case "$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")" in

@@ -36,6 +36,6 @@ test.skipIf(!hasDocker)('production compose: no secret in environment, no passwo
   // кому что: секреты смонтированы тем, кто их читает
   const has = (svc: string, secret: string) => (services[svc]?.secrets ?? []).some((x) => (typeof x === 'string' ? x : (x as { source: string }).source) === secret);
   expect(has('server', 'pg_password') && has('worker', 'meili_master_key') && has('keys', 'vault_token')).toBe(true);
-  expect(has('alertmanager', 'telegram_bot_token') && has('grafana', 'grafana_admin_password')).toBe(true);
+  expect(has('alertmanager', 'alert_bot_token') && !has('alertmanager', 'telegram_bot_token') && has('grafana', 'grafana_admin_password')).toBe(true);
   expect(has('server', 'meili_master_key') || has('server', 'vault_token') || has('worker', 'vault_token')).toBe(false);
 });
