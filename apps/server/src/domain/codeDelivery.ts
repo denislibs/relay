@@ -1,6 +1,7 @@
 import { sql } from '../db';
 import { PermanentError } from '../jobs/handlers';
 import { enqueue, type Db } from '../jobs/queue';
+import { botApi } from './telegramBot';
 import { codeChannel, type CodeItem, type CodeKind, type Env } from './codeChannel';
 
 export * from './codeChannel';
@@ -43,30 +44,10 @@ export function telegramText(item: CodeItem, env: Env = process.env): { text: st
   return { text, entities: [{ type: 'bold', offset: 0, length: head.length }, { type: 'code', offset: codeAt, length: item.code.length }] };
 }
 
-/**
- * sendMessage Bot API — только в TELEGRAM_OWNER_CHAT_ID. Токен — в адресе запроса, поэтому ни адрес, ни текст
- * ошибки fetch (он бывает с адресом) в лог и в jobs.last_error не попадают. 429 и 5xx, сеть — повтор; прочее — нет.
- */
-export async function sendTelegram(text: string, entities: unknown[], env: Env = process.env): Promise<void> {
-  const token = env.TELEGRAM_BOT_TOKEN, chat = env.TELEGRAM_OWNER_CHAT_ID;
-  if (!token || !chat) throw new PermanentError('telegram: TELEGRAM_BOT_TOKEN and TELEGRAM_OWNER_CHAT_ID are required');
-  const api = (env.TELEGRAM_API_URL || 'https://api.telegram.org').replace(/\/+$/, '');
-  let res: Response;
-  try {
-    res = await fetch(`${api}/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ chat_id: chat, text, entities, link_preview_options: { is_disabled: true } }),
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (e) {
-    throw new Error(`telegram: request failed (${e instanceof Error ? e.name : 'error'})`);
-  }
-  const body = (await res.json().catch(() => null)) as { ok?: boolean; description?: string } | null;
-  if (res.ok && body?.ok) return;
-  const why = `telegram: ${res.status} ${String(body?.description ?? '').slice(0, 200)}`.trim();
-  if (res.status === 429 || res.status >= 500) throw new Error(why);
-  throw new PermanentError(why);
+/** sendMessage Bot API — только в TELEGRAM_OWNER_CHAT_ID (или, через deliverExternal, в чат, где номер подтверждён). */
+export async function sendTelegram(text: string, entities: unknown[], env: Env = process.env, chatId: string | number | undefined = env.TELEGRAM_OWNER_CHAT_ID): Promise<void> {
+  if (!chatId) throw new PermanentError('telegram: TELEGRAM_OWNER_CHAT_ID is required');
+  await botApi('sendMessage', { chat_id: chatId, text, entities, link_preview_options: { is_disabled: true } }, env);
 }
 
 /** Потолок сообщений бота за сутки (UTC): от перебора номеров и засыпания чата владельца. */
@@ -89,8 +70,11 @@ export async function deliverExternal(item: CodeItem, env: Env = process.env): P
     returning n`;
   if (!slot) { console.warn(`${label}: daily cap ${cap} reached, not sent (TELEGRAM_DAILY_CAP)`); return; }
   try {
-    const { text, entities } = telegramText(item, env);
-    await sendTelegram(text, entities, env);
+    // номер подтверждён в боте («Войти через Telegram», telegramLogin.ts) — код самому человеку, иначе владельцу
+    if (!(await sendDirect(item, env))) {
+      const { text, entities } = telegramText(item, env);
+      await sendTelegram(text, entities, env);
+    }
   } catch (e) {
     await sql`update code_deliveries set n = n - 1 where channel = 'telegram' and day = (now() at time zone 'utc')::date and n > 0`;
     console.warn(`${label}: failed — ${(e as Error).message}`);
@@ -98,6 +82,37 @@ export async function deliverExternal(item: CodeItem, env: Env = process.env): P
   }
   const sent = Number(slot.n);
   if (sent === 1) await sql`delete from code_deliveries where day < (now() at time zone 'utc')::date - 7`;
-  console.log(`${label}: sent`);
+  console.log(`${label}: sent${direct.has(item) ? ' to the bound chat' : ''}`);
   if (sent === Math.ceil(cap * 0.8)) console.warn(`code delivery: telegram ${sent} of ${cap} daily messages used (TELEGRAM_DAILY_CAP)`);
+}
+
+/** Доставки этого процесса, ушедшие самому человеку (для строки лога). */
+const direct = new WeakSet<CodeItem>();
+
+/** Текст кода самому человеку — как в служебном чате Relay: код моноширинный, предупреждение не пересылать. */
+export function directText(item: CodeItem): { text: string; entities: { type: 'code'; offset: number; length: number }[] } {
+  const head = 'Код для входа в Relay: ';
+  const text = `${head}${item.code}\n\nНикому не сообщайте этот код, даже если его просят от имени Relay. Если вы не входили, ничего не делайте.`;
+  return { text, entities: [{ type: 'code', offset: head.length, length: item.code.length }] };
+}
+
+/**
+ * Код входа или регистрации — в чат с ботом, где этот номер подтверждён контактом. Отказ Telegram (бот заблокирован,
+ * чат удалён) — связка снята, код уйдёт владельцу. false — связки нет.
+ */
+async function sendDirect(item: CodeItem, env: Env): Promise<boolean> {
+  if (item.kind === 'recovery' || !item.phone) return false;
+  const [link] = await sql`select tg_user_id, chat_id from telegram_links where phone = ${item.phone}`;
+  if (!link) return false;
+  const { text, entities } = directText(item);
+  try {
+    await sendTelegram(text, entities, env, Number(link.chat_id));
+  } catch (e) {
+    if (!(e instanceof PermanentError)) throw e;
+    await sql`delete from telegram_links where tg_user_id = ${link.tg_user_id}`;
+    console.warn(`code delivery: bound chat refused (${(e as Error).message}), link removed, falling back to the owner`);
+    return false;
+  }
+  direct.add(item);
+  return true;
 }

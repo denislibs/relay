@@ -41,3 +41,16 @@ test('production code delivery: telegram only with a token and an owner chat id;
   // а dev-флаги по-прежнему отказ, даже рядом с telegram
   expect(() => assertTransportSecure({ ...tg, LOG_LOGIN_CODES: '1' })).toThrow('LOG_LOGIN_CODES');
 });
+
+test('production «Войти через Telegram»: bot name and token; webhook only https with a secret header', () => {
+  const ok = { NODE_ENV: 'production', DB_SSL: 'verify-full', VALKEY_URL: 'rediss://v', S3_ENDPOINT: 'https://s3', MEILI_URL: 'https://m', KEY_SERVICE_URL: 'https://k' };
+  const tg = { ...ok, TELEGRAM_LOGIN: '1', TELEGRAM_BOT_TOKEN: '1:abc', TELEGRAM_BOT_USERNAME: 'denigram_bot' };
+  expect(() => assertTransportSecure(tg)).not.toThrow();   // без webhook — опрос getUpdates
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_BOT_USERNAME: '@denigram_bot' })).toThrow('TELEGRAM_BOT_USERNAME');
+  expect(() => assertTransportSecure({ ...tg, TELEGRAM_BOT_TOKEN: undefined })).toThrow('TELEGRAM_BOT_TOKEN');
+  const hook = { ...tg, TELEGRAM_WEBHOOK_URL: 'https://denigram.site/auth/telegram/webhook', TELEGRAM_WEBHOOK_SECRET: 'a'.repeat(32) };
+  expect(() => assertTransportSecure(hook)).not.toThrow();
+  expect(() => assertTransportSecure({ ...hook, TELEGRAM_WEBHOOK_SECRET: 'short' })).toThrow('TELEGRAM_WEBHOOK_SECRET');
+  expect(() => assertTransportSecure({ ...hook, TELEGRAM_WEBHOOK_URL: 'http://denigram.site/x' })).toThrow('TELEGRAM_WEBHOOK_URL');
+  expect(() => assertTransportSecure({ ...ok, TELEGRAM_LOGIN: '0' })).not.toThrow();
+});

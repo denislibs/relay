@@ -107,7 +107,7 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       const signup = outside && /^\+[0-9]{7,15}$/.test(key);
       if (signup) code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
       await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(signup ? code : crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
-      if (signup && queued(channel)) await queueCode(tx, { to: key, kind: 'signup', code, expiresAt });
+      if (signup && queued(channel)) await queueCode(tx, { to: key, kind: 'signup', code, expiresAt, phone: key });
       return;
     }
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
@@ -122,7 +122,10 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       await tx`update login_attempts set message_id = ${m.id} where id = ${attemptId}`;
     }
     // открытый сеанс есть — код уже в служебном чате; владельцу в Telegram шлём только тем, кому иначе некуда
-    if (!live && queued(channel)) await queueCode(tx, { to: key, kind: 'login', code, expiresAt });
+    if (!live && queued(channel)) {
+      const [u] = await tx`select phone from users where id = ${userId}`;
+      await queueCode(tx, { to: key, kind: 'login', code, expiresAt, phone: (u?.phone as string | null) ?? undefined });
+    }
   });
   if (channel === 'log' && code) console.log(`login code for ${key}: ${code}`);
   return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };

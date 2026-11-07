@@ -62,6 +62,12 @@ x-code-delivery: &code-delivery
   TELEGRAM_OWNER_CHAT_ID: ${TELEGRAM_OWNER_CHAT_ID:?set TELEGRAM_OWNER_CHAT_ID (docs/code-delivery.md)}
   TELEGRAM_DAILY_CAP: ${TELEGRAM_DAILY_CAP:-300}
   CODE_TIME_ZONE: ${CODE_TIME_ZONE:-UTC}
+  # «Войти через Telegram» (необязательно): TELEGRAM_LOGIN=1, имя бота без @; webhook — https://<домен>/auth/telegram/webhook
+  # и секрет заголовка (без адреса воркер опрашивает getUpdates)
+  TELEGRAM_LOGIN: ${TELEGRAM_LOGIN:-0}
+  TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+  TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
 
 x-hardened: &hardened
   read_only: true

@@ -41,10 +41,16 @@ const video = startWorker({ concurrency: Number(process.env.VIDEO_CONCURRENCY ??
 const photo = startWorker({ concurrency: Number(process.env.PHOTO_CONCURRENCY ?? 2), kinds: { only: SLOW_KINDS.photo } });
 const worker = { stop: () => Promise.all([main.stop(), video.stop(), photo.stop()]) };
 await startKeyEvents();   // уничтоженный ключ чата забывается в памяти сразу
+// «Войти через Telegram»: webhook (production) или опрос getUpdates (dev, без входящего HTTPS) — domain/telegramLogin.ts
+const { setupWebhook, startPolling, telegramLoginEnabled } = await import('./domain/telegramLogin');
+const telegram = !telegramLoginEnabled() ? null
+  : process.env.TELEGRAM_WEBHOOK_URL ? (await setupWebhook().catch((e) => console.error(`telegram login: setWebhook — ${(e as Error).message}`)), null)
+  : startPolling();
 console.log('relay worker started');
 
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, async () => {
+    void telegram?.stop();   // длинный опрос не ждём
     await worker.stop();
     await sql.end();
     process.exit(0);

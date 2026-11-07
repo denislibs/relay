@@ -115,7 +115,7 @@ test('a failed send is retried; a refusal (403) is not, and the dead job keeps n
   const [dead] = await sql`select payload, last_error from jobs_dead where kind = 'code.deliver'`;
   expect(dead.last_error).toContain('403');
   expect(dead.payload.secret).toBeUndefined();
-  expect(Object.keys(dead.payload).sort()).toEqual(['expiresAt', 'kind', 'to']);
+  expect(Object.keys(dead.payload).sort()).toEqual(['expiresAt', 'kind', 'phone', 'to']);
   logIsClean(lastCode());
   expect(lines.some((l) => l.includes('failed — telegram: 403'))).toBe(true);
 });

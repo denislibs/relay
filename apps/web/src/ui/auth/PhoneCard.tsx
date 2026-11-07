@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { call, errorText } from './api';
 import { CardHead, ErrorLine, Logo, Spinner, useFlow } from './AuthFlow';
 import { PasskeyButton } from './PasskeyButton';
+import { TelegramLink } from './TelegramCard';
 import { countries, formatPhone, guessCountry, searchCountries, type Country } from './phone';
 
 /** Номер телефона: страна (поиск по списку) + номер с маской страны и серым хвостом шаблона. */
@@ -86,6 +87,7 @@ export function PhoneCard(props: { initial?: string }) {
       </div>
       <div class="auth-links">
         <button type="button" class="auth-link" onClick={() => flow.go({ name: 'qr' })}>Вход по QR-коду ›</button>
+        <TelegramLink />
         <PasskeyButton disabled={busy} />
         {flow.dev ? <button type="button" class="auth-link auth-link-dev" onClick={() => flow.go({ name: 'dev' })}>Dev-вход по имени</button> : null}
       </div>

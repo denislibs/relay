@@ -18,7 +18,7 @@ export async function createUser(name: string): Promise<number> {
  * этого человека, затем строка с устройством (грубо по User-Agent) и IP входа.
  */
 /** Как вошли — для «Новый вход» и списка сеансов. */
-export type LoginMethod = 'code' | 'password' | 'recovery' | 'signup' | 'passkey' | 'qr' | 'dev';
+export type LoginMethod = 'code' | 'password' | 'recovery' | 'signup' | 'passkey' | 'qr' | 'telegram' | 'dev';
 
 /**
  * deviceKey — публичный ключ устройства (deviceProof при входе): сеанс сразу привязан к нему.

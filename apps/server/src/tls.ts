@@ -3,7 +3,7 @@
 // в production без TLS к базе и Valkey процесс не запускается (assertTransportSecure). Обхода нет (аудит 2026-10-25,
 // INFRA-1): прежний RELAY_PLAIN_INTERNAL=1 подталкивал выключить проверку целиком; в production он — ошибка.
 import { readFileSync } from 'node:fs';
-import { codeDeliveryProblems } from './domain/codeChannel';
+import { codeDeliveryProblems, telegramLoginProblems } from './domain/codeChannel';
 
 type Env = Record<string, string | undefined>;
 const file = (p: string | undefined) => (p ? readFileSync(p, 'utf8') : undefined);
@@ -36,7 +36,7 @@ export function assertTransportSecure(env: Env = process.env): void {
   if (env.DEV_LOGIN === '1') problems.push('DEV_LOGIN=1 is not allowed in production');
   if (env.LOG_LOGIN_CODES === '1') problems.push('LOG_LOGIN_CODES=1 is not allowed in production');
   // коды входа: только настоящий канал (telegram) и с полной настройкой — иначе регистрация молча не работала бы
-  problems.push(...codeDeliveryProblems(env));
+  problems.push(...codeDeliveryProblems(env), ...telegramLoginProblems(env));
   const db = dbSsl(env);
   if (db === false || db === 'require') problems.push('database: DB_SSL=verify-full with DB_CA');
   if (env.VALKEY_URL && !env.VALKEY_URL.startsWith('rediss://')) problems.push('valkey: VALKEY_URL=rediss://…');

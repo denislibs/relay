@@ -12,6 +12,7 @@ import {
   challengeFor, type LoginStep,
 } from './domain/password';
 import { acceptQr, createQr, pollQr, qrInfo } from './domain/qrLogin';
+import { createTelegramLogin, handleBotUpdate, pollTelegramLogin, telegramLoginEnabled, webhookAllowed, type BotUpdate } from './domain/telegramLogin';
 import { announceLogin, assertConfirmed } from './domain/sessions';
 
 /** Маршруты входа. null — путь не наш. До сеанса — /auth/*, с сеансом — /settings/password|passkeys и подтверждение QR. */
@@ -63,7 +64,7 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
   if (!p.startsWith('/auth/') && p !== '/dev/codes') return null;
   if (post && !signInRequestOk(req)) return Response.json({ code: 'bad_frame' }, { status: 400 });
 
-  if (req.method === 'GET' && p === '/auth/config') return Response.json({ dev: process.env.DEV_LOGIN === '1' });
+  if (req.method === 'GET' && p === '/auth/config') return Response.json({ dev: process.env.DEV_LOGIN === '1', telegram: telegramLoginEnabled() });
   if (req.method === 'GET' && p === '/dev/codes' && devAllowed(req, server)) return Response.json({ items: await devOutbox() });
 
   if (post && p === '/auth/code') {
@@ -109,6 +110,29 @@ export async function publicAuthRoute(req: Request, url: URL, server: Server): P
     const r = await pollQr(b.token, key);
     if (typeof r === 'string') return Response.json({ status: r });
     return reply(await afterFirstFactor({ userId: r.userId, confirmed: true }), req, server, key, 'qr');   // впустило вошедшее устройство
+  }
+
+  // «Войти через Telegram»: как QR — ключ устройства записан при создании, забрать вход опросом может только оно;
+  // номер подтвердил бот (контакт или связка) — дальше как после верного кода (сеанс неподтверждённый)
+  if (post && p === '/auth/telegram') {
+    const key = await deviceProof((await body(req)).device);
+    return Response.json(await createTelegramLogin(clientIp(req, server), key));
+  }
+  if (post && p === '/auth/telegram/poll') {
+    const b = await body(req);
+    const key = await deviceProof(b.device);
+    const r = await pollTelegramLogin(b.token, key);
+    if (typeof r === 'string') return Response.json({ status: r });
+    const [u] = await sql`select id from users where phone = ${r.phone} and not system`;
+    if (!u) return Response.json({ ...(await startSignup(r.phone)), phone: r.phone });
+    return reply(await afterFirstFactor({ userId: Number(u.id), confirmed: false }), req, server, key, 'telegram');
+  }
+  // обновления бота (webhook): только с секретом заголовка; ответ всегда 200 — повтор Telegram ничего бы не исправил
+  if (post && p === '/auth/telegram/webhook') {
+    if (!webhookAllowed(req)) return Response.json({ code: 'not_found' }, { status: 404 });
+    const u = (await body(req)) as BotUpdate;
+    if (typeof u.update_id === 'number') await handleBotUpdate(u);
+    return Response.json({ ok: true });
   }
 
   // паскей: ключ устройства записан вместе с вызовом — подпись паскея над этим вызовом впускает именно это устройство
