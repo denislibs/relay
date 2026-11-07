@@ -1316,10 +1316,13 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-emoji-grid { display: grid; grid-template-columns: repeat(auto-fill, 42px); grid-auto-rows: 42px; justify-content: space-between; column-gap: 4px; padding: 0 8px; }
 .app-emoji { width: 42px; height: 42px; padding: 0; border: 0; border-radius: 12px; background: transparent; font-size: 34px; line-height: 42px; text-align: center; cursor: pointer; }
 .app-emoji:hover { background: var(--sym-hover); }
-/* анимированный эмодзи под курсором (выбор иконки папки): поверх глифа, глиф прячется с первым кадром */
+/* анимированный эмодзи под курсором (выбор иконки папки): поверх глифа и подменяет его одним кадром — глиф прячется
+   по data-drawn, который StickerView ставит в задаче, нарисовавшей первый кадр, а холст сразу непрозрачный. Проявление
+   стикера (rl-sticker-fade) здесь давало пустую ячейку и бледный эмодзи: глифа уже нет, холст ещё прозрачный */
 .app-emoji { position: relative; }
 .app-emoji > span { display: block; }
-.app-emoji > span.is-under { visibility: hidden; }
+.app-emoji:has(> .rl-sticker[data-drawn]) > span { visibility: hidden; }
+.app-emoji .rl-sticker-canvas { opacity: 1; animation: none; }
 .app-emoji .rl-sticker { position: absolute; left: 4px; top: 4px; pointer-events: none; }
 .app-emoji.is-on { background: var(--accent-soft); }
 /* меню оттенков кожи: над плиткой (или под ней, если сверху тесно), прозрачность и масштаб за 200 мс */

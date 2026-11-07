@@ -508,15 +508,15 @@ const EmojiSectionMemo = memo(EmojiSection);
 /** Кнопка эмодзи: v — что показать и вставить (с выбранным оттенком); наведение — своя анимация поверх глифа. */
 function EmojiCell({ e, v, on, ctx, place }: { e: string; v: string; on: boolean; ctx: { current: CellCtx }; place?: { gridRowStart: number; gridColumnStart: number } }) {
   const [hover, setHover] = useState(false);
-  const [drawn, setDrawn] = useState(false);   // у анимации есть первый кадр — глиф под ней прячем
   const { animate, tones } = ctx.current;
   const src = hover && animate && !reducedMotion() ? animate(v) : undefined;
   return (
     <button type="button" class={'app-emoji' + (on ? ' is-on' : '')} style={place} data-e={e} data-tones={tones && emojiTones(e) ? '' : undefined}
       aria-label={v} aria-pressed={on || undefined} onClick={() => ctx.current.pick(v)}
-      onMouseEnter={animate ? () => { if (animate(v)) { setDrawn(false); setHover(true); } } : undefined} onMouseLeave={animate ? () => setHover(false) : undefined}>
-      <span class={src && drawn ? 'is-under' : undefined}><EmojiGlyph e={v} /></span>
-      {src ? <StickerView src={src} w={512} h={512} size={34} group="menu" force loop={false} onFirstFrame={() => setDrawn(true)} onEnded={() => setHover(false)} /> : null}
+      onMouseEnter={animate ? () => { if (animate(v)) setHover(true); } : undefined} onMouseLeave={animate ? () => setHover(false) : undefined}>
+      {/* глиф прячется в CSS по data-drawn анимации — в том же кадре, где она нарисована (app.css, .app-emoji) */}
+      <span><EmojiGlyph e={v} /></span>
+      {src ? <StickerView src={src} w={512} h={512} size={34} group="menu" force loop={false} onEnded={() => setHover(false)} /> : null}
     </button>
   );
 }
