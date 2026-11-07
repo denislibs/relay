@@ -1,4 +1,4 @@
-import { CheckRow, ConfirmDialog, Icon, InfoRow, RangeRow, SearchInput, Section } from '@relay/ui';
+import { ConfirmDialog, Icon, InfoRow, RangeRow, SearchInput, Section, SwitchRow } from '@relay/ui';
 import { MEDIA_RIGHTS, SLOW_MODES, type BannedMember, type GroupMember, type MemberRight, type MemberRights } from '@relay/protocol';
 import { useState } from 'preact/hooks';
 import { useGlobal } from '../../global';
@@ -9,23 +9,24 @@ import { lastSeenText } from '../format';
 import { GPage, Loading, PersonRow } from './common';
 import type { Nav } from './Manage';
 
-/** Чекбоксы прав: текст, «Медиа» с раскрытием (x/7), остальное. locked — запрещено умолчаниями (не включить). */
+/** Переключатели прав: текст, «Медиа» с раскрытием (x/7), остальное. locked — запрещено умолчаниями (не включить). */
 export function RightsList({ value, onChange, locked, disabled }: { value: MemberRights; onChange: (r: MemberRights) => void; locked?: MemberRights | null; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const off = (k: MemberRight) => disabled || (locked ? !locked[k] : false);
   const n = mediaCount(value);
   const row = (k: MemberRight) => (
-    <CheckRow key={k} label={MEMBER_RIGHT_TEXT[k]} checked={value[k]} disabled={off(k)} onChange={(on: boolean) => onChange(toggleRight(value, k, on))} />
+    <SwitchRow key={k} label={MEMBER_RIGHT_TEXT[k]} checked={value[k]} disabled={off(k)} onChange={(on: boolean) => onChange(toggleRight(value, k, on))} />
   );
   return (
     <>
       {row('text')}
       <div class="app-gm-media">
-        <CheckRow label={<>Медиа <span class="app-gm-count">{n}/{MEDIA_RIGHTS.length}</span></>} checked={n > 0}
+        {/* стрелка раскрытия — внутри подписи: кнопка в label не переключает его, а переключатель остаётся справа, как у остальных */}
+        <SwitchRow label={<>Медиа <span class="app-gm-count">{n}/{MEDIA_RIGHTS.length}</span>
+          <button type="button" class={'app-gm-expand' + (open ? ' is-open' : '')} aria-expanded={open} aria-label="Показать виды медиа" onClick={(e) => { e.preventDefault(); setOpen(!open); }}>
+            <Icon name="chevronDown" size={20} />
+          </button></>} checked={n > 0}
           disabled={disabled || (locked ? MEDIA_RIGHTS.every((k) => !locked[k]) : false)} onChange={(on: boolean) => onChange(toggleRight(value, 'media', on))} />
-        <button type="button" class={'app-gm-expand' + (open ? ' is-open' : '')} aria-expanded={open} aria-label="Показать виды медиа" onClick={() => setOpen(!open)}>
-          <Icon name="chevronDown" size={20} />
-        </button>
       </div>
       <div class={'app-gm-sub' + (open ? ' is-open' : '')} inert={!open || undefined}>
         <div>{MEDIA_RIGHTS.map(row)}</div>
