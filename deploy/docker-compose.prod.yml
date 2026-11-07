@@ -28,7 +28,6 @@ services:
   # главный ключ (Transit relay-chat-keys). После старта — запечатан: deploy/bao-unseal.sh (ключи — у владельца).
   # Первый раз: deploy/bao-init.sh. Ключ TLS доступен только root на хосте — копия с правами openbao при старте.
   openbao:
-    ulimits: { nofile: { soft: 65536, hard: 65536 } }   # по умолчанию 1024 — около 500 соединений (2026-11-07)
     image: openbao/openbao:2.7.2
     # старт от root только ради копии ключа TLS (на хосте он root/600); дальше entrypoint образа сам переходит
     # на пользователя openbao (su-exec) — сервер работает не от root
