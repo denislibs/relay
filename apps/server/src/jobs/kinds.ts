@@ -1,6 +1,7 @@
 // Регистрация доменных обработчиков задач. Импортируется процессом-воркером и тестами.
 import { sql } from '../db';
 import { deliver } from '../domain/devOutbox';
+import { deliverExternal, type CodeKind } from '../domain/codeDelivery';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
@@ -110,8 +111,13 @@ register('push.deliver', async (p: { endpoint: string; push?: PushPayload; chatI
 });
 
 // письмо восстановления пароля: код лежит в payload.secret до выполнения задачи
-register('mail.recovery', async (p: { to: string; secret: { code: string } }) => {
-  await deliver({ to: p.to, kind: 'recovery', code: p.secret.code });
+register('mail.recovery', async (p: { to: string; expiresAt?: string; secret: { code: string } }) => {
+  await deliver({ to: p.to, kind: 'recovery', code: p.secret.code, expiresAt: p.expiresAt });
+});
+
+// код входа или регистрации внешним каналом (CODE_DELIVERY=telegram, domain/codeDelivery.ts): после коммита, с повторами
+register('code.deliver', async (p: { to: string; kind: CodeKind; expiresAt?: string; secret: { code: string } }) => {
+  await deliverExternal({ to: p.to, kind: p.kind, code: p.secret.code, expiresAt: p.expiresAt });
 });
 
 export const SWEEP_EVERY_SEC = 3600;

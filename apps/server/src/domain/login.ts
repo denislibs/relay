@@ -4,6 +4,7 @@ import { DomainError } from './errors';
 import { postService, systemUserId } from './service';
 import { updateContent } from './messageContent';
 import { fanOut } from './journal';
+import { codeChannel, deliverable, queued, queueCode } from './codeDelivery';
 
 export const CODE_LENGTH = 5;
 const CODE_TTL_MIN = 5, MAX_TRIES = 5, MAX_PER_HOUR = 5;
@@ -65,7 +66,8 @@ const BURN_MAX_RUN = 64, BURN_MAX_WINDOWS = 256;
  * Неизвестный логин отвечает так же: попытка записывается на системного пользователя со случайным хэшем,
  * её код не совпадёт никогда — по ответам нельзя понять, есть ли такой аккаунт (лимит тоже по строке логина).
  * via всегда 'app': нет открытых сеансов — отвечаем так же, но код никому не доставляется и хэш неугадываемый
- * (кроме DEV_LOGIN: там реальный хэш и devCode) — иначе ответ выдавал бы, есть ли аккаунт и открыт ли он.
+ * (кроме канала доставки CODE_DELIVERY — dev, log, telegram: там реальный хэш и код уходит туда, codeDelivery.ts) —
+ * иначе ответ выдавал бы, есть ли аккаунт и открыт ли он.
  * Попытки не удаляются при использовании (dead_at) — иначе «запрос → 5 неверных → запрос» обходил бы часовой лимит.
  * Лимит в час — по строке логина (для любого, в т.ч. неизвестного) и, если логин найден, ещё и по аккаунту:
  * телефон и @имя одного человека — разные строки, но коды одного аккаунта.
@@ -76,9 +78,10 @@ export async function requestCode(login: string, ip: string | null = null): Prom
   const key = normalize(login);
   const userId = await findUser(login);
   const sys = await systemUserId();
-  const dev = process.env.DEV_LOGIN === '1';
-  // SMS нет, код читает владелец стенда в логе сервера и передаёт человеку сам
-  const logged = process.env.LOG_LOGIN_CODES === '1';
+  // SMS нет: код в ответе (dev), в логе сервера (log) или у владельца в Telegram (telegram) — он передаёт его сам
+  const channel = codeChannel();
+  const dev = channel === 'dev', outside = deliverable(channel);
+  const expiresAt = new Date(Date.now() + CODE_TTL_MIN * 60_000).toISOString();
   // запись без привязки к человеку: неавторизованный вызов не должен копить строки бесконечно (час нужен лимитам)
   await sql`delete from login_attempts where created_at < now() - interval '1 day'`;
   let code = '';
@@ -100,16 +103,17 @@ export async function requestCode(login: string, ip: string | null = null): Prom
     }
     const expires = tx`now() + ${CODE_TTL_MIN + ' minutes'}::interval`;
     if (userId == null) {
-      // новый номер: регистрация возможна, только если код есть куда доставить — без SMS это лишь dev (devCode)
-      const signup = (dev || logged) && /^\+[0-9]{7,15}$/.test(key);
+      // новый номер: регистрация возможна, только если код есть куда доставить (канал доставки, не служебный чат)
+      const signup = outside && /^\+[0-9]{7,15}$/.test(key);
       if (signup) code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
       await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${sys}, ${hash(signup ? code : crypto.randomUUID())}, ${expires}, ${key}, ${ip})`;
+      if (signup && queued(channel)) await queueCode(tx, { to: key, kind: 'signup', code, expiresAt });
       return;
     }
     const [{ live }] = await tx`select count(*)::int as live from sessions where user_id = ${userId} and expires_at > now()`;
     code = String(randomInt(0, 10 ** CODE_LENGTH)).padStart(CODE_LENGTH, '0');
-    // некому получить код — реальный хэш хранится только в dev (devCode), иначе его мог бы лишь угадать злоумышленник
-    const stored = live || dev || logged ? hash(code) : hash(crypto.randomUUID());
+    // некому получить код — реальный хэш хранится, только если есть канал доставки, иначе его мог бы лишь угадать злоумышленник
+    const stored = live || outside ? hash(code) : hash(crypto.randomUUID());
     await tx`insert into login_attempts (id, user_id, code_hash, expires_at, login, ip) values (${attemptId}, ${userId}, ${stored}, ${expires}, ${key}, ${ip})`;
     if (live) {
       // прежние коды в чате больше не показываем: новая попытка — старые цифры скрыты («Код заменён новым»)
@@ -117,8 +121,10 @@ export async function requestCode(login: string, ip: string | null = null): Prom
       const m = await postService(tx, userId, { type: 'login_code', ...codeMessage(code) });
       await tx`update login_attempts set message_id = ${m.id} where id = ${attemptId}`;
     }
+    // открытый сеанс есть — код уже в служебном чате; владельцу в Telegram шлём только тем, кому иначе некуда
+    if (!live && queued(channel)) await queueCode(tx, { to: key, kind: 'login', code, expiresAt });
   });
-  if (logged && code) console.log(`login code for ${key}: ${code}`);
+  if (channel === 'log' && code) console.log(`login code for ${key}: ${code}`);
   return { attemptId, via: 'app', length: CODE_LENGTH, ...(dev && code ? { devCode: code } : {}) };
 }
 
