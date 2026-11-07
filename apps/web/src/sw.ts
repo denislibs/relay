@@ -39,7 +39,7 @@ declare const __SHELL__: string[];   // код и стили этой сборк
 declare const __INTEGRITY__: Record<string, string>;   // файл с хэшем в имени → SHA-256 его байтов (build.ts)
 const INTEGRITY: Record<string, string> = __INTEGRITY__;
 const SHELL = ['/', ...__SHELL__, '/sounds/message.mp3', '/sounds/sent.mp3'];   // звуки сообщений — и без сети
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|relay-files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|relay-files|push|calls|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 sw.addEventListener('install', (e) => {
   // мимо HTTP-кэша браузера: новая сборка не должна положить к себе файл прежней; чужие байты — установка не удаётся,
@@ -180,9 +180,11 @@ sw.addEventListener('fetch', (e) => {
 const SYSTEM_ICON = '/relay-logo-192.png';
 
 // Web Push: сервер шлёт, когда у пользователя нет ни одной живой вкладки. Окно в фокусе — не мешаем.
+type CallPush = { id: string; video?: boolean; end?: boolean; missed?: boolean };
 sw.addEventListener('push', (e) => {
-  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string; system?: boolean }; } catch { return null; } })();
+  const d = (() => { try { return e.data?.json() as { chatId: number; id: number; title: string; body: string; system?: boolean; call?: CallPush }; } catch { return null; } })();
   if (!d) return;
+  if (d.call) { e.waitUntil(callPush(d as typeof d & { call: CallPush })); return; }
   e.waitUntil((async () => {
     const wins = await sw.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (wins.some((w) => (w as WindowClient).focused)) return;
@@ -192,9 +194,27 @@ sw.addEventListener('push', (e) => {
   })());
 });
 
+// звонок 1:1, вкладок нет (сервер шлёт только тогда): уведомление «Принять / Отклонить» висит, пока звонят;
+// конец звонка закрывает его, не ответил — «Пропущенный звонок» (calls.ts на сервере, push.call)
+async function callPush(d: { chatId: number; title: string; body: string; call: CallPush }): Promise<void> {
+  const tag = 'call-' + d.call.id;
+  if (d.call.end) {
+    for (const n of await sw.registration.getNotifications({ tag })) n.close();
+    if (d.call.missed) await sw.registration.showNotification(d.title, { body: d.body, tag: 'chat-' + d.chatId, data: { chatId: d.chatId } });
+    return;
+  }
+  await sw.registration.showNotification(d.title, {
+    body: d.body, tag, requireInteraction: true, data: { chatId: d.chatId, callId: d.call.id },
+    actions: [{ action: 'accept', title: 'Принять' }, { action: 'decline', title: 'Отклонить' }],
+    vibrate: [400, 200, 400, 200, 400],
+  } as NotificationOptions);
+}
+
 // клик: есть вкладка — поднимаем её и открываем чат, нет — новая вкладка сразу на чате
 sw.addEventListener('notificationclick', (e) => {
   e.notification.close();
+  const callId = typeof e.notification.data?.callId === 'string' ? e.notification.data.callId as string : null;
+  if (callId) { e.waitUntil(callClick(callId, e.action)); return; }
   const chatId = Number(e.notification.data?.chatId) || null;
   const threadId = Number(e.notification.data?.threadId) || null;   // комментарий в треде — открыть тред
   e.waitUntil((async () => {
@@ -206,6 +226,16 @@ sw.addEventListener('notificationclick', (e) => {
     } else await sw.clients.openWindow(chatId ? '/#chat=' + chatId + (threadId ? '&thread=' + threadId : '') : '/');
   })());
 });
+
+// уведомление о звонке: «Отклонить» — запросом (вкладки может не быть; cookie сеанса уходит сам, 401 «обнови» — installDeviceFetch),
+// «Принять» или клик — вкладка на экране звонка: открытая получает сообщение, иначе новая с #call=<id>[&accept=1]
+async function callClick(callId: string, action: string): Promise<void> {
+  if (action === 'decline') { await fetch('/calls/' + callId + '/decline', { method: 'POST' }).catch(() => {}); return; }
+  const accept = action === 'accept';
+  const win = (await sw.clients.matchAll({ type: 'window', includeUncontrolled: true }))[0] as WindowClient | undefined;
+  if (win) { await win.focus(); win.postMessage({ type: 'call', callId, accept }); }
+  else await sw.clients.openWindow('/#call=' + callId + (accept ? '&accept=1' : ''));
+}
 
 // браузер сменил подписку (истекла / ключи) — переподписываемся и сообщаем серверу; cookie сессии уходит сам
 sw.addEventListener('pushsubscriptionchange', (ev) => {

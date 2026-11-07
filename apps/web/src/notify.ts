@@ -1,4 +1,5 @@
 import { getGlobal, setGlobal, subscribeGlobal } from './global';
+import { callIntent } from './calls/callController';
 import { incomingText, notifyText, planIncoming } from './notifyRules';
 import { getPrefs, setPref, subscribePrefs } from './prefs';
 import { playNotifySound } from './sound';
@@ -81,6 +82,7 @@ export function startNotify(openChat: (id: number, threadId?: number) => void): 
   });
   navigator.serviceWorker?.addEventListener('message', (e) => {
     if (e.data?.type === 'openChat') openChat(Number(e.data.chatId), Number(e.data.threadId) || undefined);
+    else if (e.data?.type === 'call' && typeof e.data.callId === 'string') callIntent(e.data.callId, e.data.accept === true);
   });
 }
 

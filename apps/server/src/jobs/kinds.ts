@@ -4,7 +4,7 @@ import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
-import { deliverPush, planPush, planPushPage, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
+import { deliverPush, planCallPush, planPush, planPushPage, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
@@ -23,6 +23,7 @@ import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 import { trimAdminLog } from '../domain/adminLog';
 import { expireRing } from '../domain/calls';
+import { CALL_RING_MS } from '@relay/protocol';
 import { checkGroupCall } from '../domain/groupCalls';
 import { publishTopic } from '../bus';
 
@@ -262,6 +263,15 @@ register('linkPreview.expire', async () => {
 
 // звонок без ответа CALL_RING_MS — пропущен (если ещё звонит); кадр callEnded — через шину процессам с сокетами
 register('call.ring', async (p: { callId: string }) => expireRing(publishTopic, String(p.callId)));
+
+// звонок адресату без живых вкладок (domain/calls.ts): доставка сразу, без push.deliver — повтор позже звонка не нужен.
+// Пуш о звонке живёт, пока звонят (ttl), — опоздавший push-сервис не позвонит через час
+register('push.call', async (p: { callId: string; chatId: number; caller: number; callee: number; video: boolean; end?: boolean; missed?: boolean }) => {
+  const targets = await planCallPush(p);
+  const ttl = p.end ? 3600 : Math.ceil(CALL_RING_MS / 1000);
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, ttl)));
+  for (const r of res) if (r.status === 'rejected') console.warn('push.call:', r.reason);
+});
 
 // групповой звонок: ушедшие без пинга — из состава, пустой — завершить (domain/groupCalls.ts)
 register('groupcall.check', async (p: { callId: string }) => checkGroupCall(publishTopic, String(p.callId)));

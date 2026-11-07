@@ -4,6 +4,7 @@ import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
+import { declineFromPush } from './domain/calls';
 import { clientIp, devAllowed } from './device';
 import type { Server } from 'bun';
 import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
@@ -99,7 +100,7 @@ const PRE_PROOF_BYTES = 256 * 1024;
 export const WS_MAX_FRAME = 256 * 1024;
 /** кадров в секунду на сокет */
 const WS_RATE = 100;
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|calls|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -403,6 +404,9 @@ export function createServer(opts: { port: number }): Server {
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
+        // «Отклонить» в уведомлении о звонке (service worker): вкладок нет — WebSocket открыть негде
+        const callDecline = /^\/calls\/([0-9a-f-]{36})\/decline$/.exec(url.pathname);
+        if (callDecline && req.method === 'POST') return Response.json(await declineFromPush(publish, userId, callDecline[1]));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
           const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');

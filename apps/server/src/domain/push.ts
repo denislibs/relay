@@ -101,7 +101,31 @@ export async function unsubscribe(userId: number, endpoint: string): Promise<voi
 
 /** system — служебное сообщение Relay: SW ставит знак Relay иконкой. */
 /** mention — упоминание меня (push.mention): SW может показать его даже в заглушённом чате. */
-export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true };
+/** call — звонок (push.call): SW показывает уведомление с «Принять / Отклонить» или закрывает его (end). */
+export type PushPayload = { chatId: number; id: number; title: string; body: string; system?: true; mention?: true; call?: CallPushInfo };
+export type CallPushInfo = { id: string; video?: true; end?: true; missed?: true };
+
+/** Звонок 1:1 → пуш адресату: его подписки живых сеансов (кто может звонить — уже проверено запросом звонка).
+ *  Заглушённый чат звонит всё равно (как в Telegram); «скрывать текст» — без имени. Онлайн проверяет вызывающий. */
+export async function planCallPush(p: { callId: string; chatId: number; caller: number; callee: number; video: boolean; end?: boolean; missed?: boolean }):
+  Promise<{ endpoint: string; push: PushPayload }[]> {
+  const rows = await sql`
+    select s.endpoint, s.hide_text,
+           (select ${nameForSql(sql`s.user_id`)} from users u where u.id = ${p.caller}) as caller_name
+      from push_subscriptions s
+      join sessions se on se.id = s.session_id
+      left join user_settings us on us.user_id = s.user_id
+     where s.user_id = ${p.callee}
+       and se.expires_at > now()
+       and se.last_active_at > now() - make_interval(days => coalesce(us.sessions_ttl_days, ${DEFAULT_TTL_DAYS}))
+       and not exists (select 1 from blocks b where b.owner_id = s.user_id and b.user_id = ${p.caller})`;
+  const call: CallPushInfo = { id: p.callId, ...(p.video ? { video: true as const } : {}), ...(p.end ? { end: true as const } : {}), ...(p.missed ? { missed: true as const } : {}) };
+  const body = p.end ? (p.missed ? 'Пропущенный звонок' : '') : p.video ? 'Входящий видеозвонок' : 'Входящий звонок';
+  return rows.map((s) => ({
+    endpoint: s.endpoint as string,
+    push: { chatId: p.chatId, id: 0, title: s.hide_text === true ? 'Relay' : (s.caller_name as string), body, call },
+  }));
+}
 
 export type PushMessage = { chatId: number; id: number; senderId: number; body: string; entities?: { type: string; offset: number; length: number }[]; kind?: string; attachment?: { name?: string } | null; service?: { type: string }; sticker?: { emoji?: string } | null; post?: boolean; album?: number; silent?: boolean; reminder?: boolean };   // album — файлов в альбоме (одно уведомление на все)
 
@@ -199,13 +223,13 @@ const PUSH_TIMEOUT_MS = 10_000;
  * Одна доставка (задача push.deliver). Ключи подписки читаются сейчас: подписку могли удалить или обновить после постановки.
  * 404/410 — подписка отозвана, забываем; 429/5xx/сеть — Error (повтор); прочие 4xx — PermanentError.
  */
-export async function deliverPush(endpoint: string, push: PushPayload): Promise<void> {
+export async function deliverPush(endpoint: string, push: PushPayload, ttlSec = 86400): Promise<void> {
   const [s] = await sql`select p256dh, auth from push_subscriptions where endpoint = ${endpoint}`;
   if (!s) return;
   const plain = enc.encode(JSON.stringify(push).slice(0, 3000));
   const res = await fetch(endpoint, {
     method: 'POST',
-    headers: { authorization: await vapidHeader(endpoint), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: 'high' },
+    headers: { authorization: await vapidHeader(endpoint), 'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: String(ttlSec), urgency: 'high' },
     body: await encryptPayload(s.p256dh as string, s.auth as string, plain),
     signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
     decompress: false,   // адрес push-сервиса задаёт клиент: его ответ не распаковываем (CVE-2026-111497)

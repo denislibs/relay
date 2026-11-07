@@ -6,6 +6,7 @@ import { hit, key, PREFIX, valkey } from '../valkey';
 import { DomainError } from './errors';
 import { serviceMessage } from './groups';
 import { canSee, privacyCtx } from './privacy';
+import { onlineUsers } from './liveRegistry';
 
 /**
  * Звонки 1:1 (docs/plans/2026-11-06-relay-calls.md). Сервер решает только «кто, с кем, в каком состоянии»:
@@ -76,6 +77,7 @@ return 1`;
 type Call = {
   id: string; chatId: number; caller: number; callee: number; video: boolean; commit: string; at: number;
   state: 'ringing' | 'accepted' | 'ended'; cSession: number; cTab: string; aSession?: number; aTab?: string; acceptedAt?: number;
+  pushed: boolean;   // адресату ушёл пуш о звонке: конец звонка тоже пушем (закрыть уведомление / «пропущенный»)
 };
 
 const callKey = (id: string) => key('call:' + id);
@@ -88,7 +90,7 @@ async function load(id: string): Promise<Call | null> {
   if (!h.state) return null;
   return {
     id, chatId: Number(h.chatId), caller: Number(h.caller), callee: Number(h.callee), video: h.video === '1', commit: h.commit, at: Number(h.at),
-    state: h.state as Call['state'], cSession: Number(h.cSession), cTab: h.cTab,
+    state: h.state as Call['state'], cSession: Number(h.cSession), cTab: h.cTab, pushed: h.pushed === '1',
     ...(h.aSession ? { aSession: Number(h.aSession), aTab: h.aTab, acceptedAt: Number(h.acceptedAt) } : {}),
   };
 }
@@ -143,6 +145,11 @@ export async function requestCall(publish: Publish, userId: number, sessionId: n
   const call = (await load(f.callId))!;
   send(publish, `user:${callee}`, { op: 'callIncoming', call: info(call) });
   await enqueue(sql, 'call.ring', { callId: f.callId }, { runAt: new Date(now + CALL_RING_MS), dedupeKey: `call:${f.callId}:ring` });
+  // ни одной живой вкладки у адресата — звонок доходит пушем (открытая вкладка, даже скрытая, звонит сама)
+  if (!(await onlineUsers([callee])).has(callee)) {
+    await valkey().send('HSET', [callKey(f.callId), 'pushed', '1']);
+    await enqueue(sql, 'push.call', { callId: f.callId, chatId: f.chatId, caller: userId, callee, video: f.video }, { dedupeKey: `push.call:${f.callId}` });
+  }
   return { ok: true };
 }
 
@@ -160,6 +167,8 @@ export async function acceptCall(publish: Publish, userId: number, sessionId: nu
   const r = String(await run(ACCEPT, [callKey(f.callId), busyKey(userId), busyKey(c.caller)], [f.callId, sessionId, f.tab, Date.now(), LIVE_TTL]));
   if (r !== 'ok') return { ok: false, reason: r === 'busy' ? 'in_call' : 'gone' };
   await valkey().send('SREM', [incomingKey(userId), f.callId]);
+  if (c.pushed) await enqueue(sql, 'push.call', { callId: c.id, chatId: c.chatId, caller: c.caller, callee: c.callee, video: c.video, end: true },
+    { dedupeKey: `push.call:${c.id}:end` }).catch((e) => console.error('call push:', e));   // ответили — уведомление на остальных устройствах закрыть
   const by = { session: sessionId, tab: f.tab };
   send(publish, `session:${c.cSession}`, { op: 'callAccepted', callId: f.callId, by, pub: f.pub, iceServers: iceServersFor(c.caller) });
   send(publish, `user:${userId}`, { op: 'callAccepted', callId: f.callId, by, iceServers: iceServersFor(userId) });
@@ -200,6 +209,14 @@ export async function declineCall(publish: Publish, userId: number, sessionId: n
   else if (c.caller === userId && c.cSession === sessionId) await finish(publish, c, 'cancelled');
 }
 
+/** «Отклонить» из уведомления (service worker, без WebSocket): только адресат и только пока звонят. */
+export async function declineFromPush(publish: Publish, userId: number, callId: string): Promise<{ ok: boolean }> {
+  const c = await load(callId);
+  if (!c || c.callee !== userId || c.state !== 'ringing') return { ok: false };
+  await finish(publish, c, 'declined');
+  return { ok: true };
+}
+
 /** Положить трубку: до ответа — как отмена/отклонение, после — конец разговора (failed — так и не соединились). */
 export async function hangupCall(publish: Publish, userId: number, sessionId: number, f: { callId: string; failed?: boolean }): Promise<void> {
   const c = await load(f.callId);
@@ -237,6 +254,13 @@ async function finish(publish: Publish, c: Call, reason: CallEndReason): Promise
   const f: CallServerFrame = { op: 'callEnded', callId: c.id, reason, ...(duration != null ? { duration } : {}) };
   send(publish, `user:${c.caller}`, f);
   send(publish, `user:${c.callee}`, f);
+  if (c.pushed && r[0] === 'ringing') {
+    // уведомление о звонке на устройствах без вкладок: закрыть; не ответил и не отклонил — «Пропущенный звонок»
+    // (ответили — его закрыл уже acceptCall)
+    const missed = reason === 'missed' || reason === 'cancelled';
+    await enqueue(sql, 'push.call', { callId: c.id, chatId: c.chatId, caller: c.caller, callee: c.callee, video: c.video, end: true, missed },
+      { dedupeKey: `push.call:${c.id}:end` }).catch((e) => console.error('call push:', e));
+  }
   await historyOnly(c.chatId, c.caller, c.video, reason, duration);
 }
 

@@ -1,12 +1,9 @@
-import type { ProfilePhoto } from '@relay/protocol';
 import { Avatar, Icon, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { acceptCall, callStreams, declineCall, hangup, toggleCam, toggleMic, type CallView } from '../../calls/callController';
 import { callStatus } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
-import { CallPlate, useNow } from './CallSlot';
-import { avatarPhoto } from '../../profilePhoto';
-import { chatTone } from '../format';
+import { CallPlate, useNow, usePeer } from './CallSlot';
 
 /**
  * Звонок поверх приложения (docs/plans/2026-11-06-relay-calls.md): входящий — карточкой, разговор — экраном
@@ -30,10 +27,6 @@ export function CallLayer() {
   );
 }
 
-function usePeer(v: CallView) {
-  const chat = useGlobal((s) => s.chats.find((c) => c.id === v.chatId));
-  return { name: (chat?.title as string) || 'Собеседник', tone: chatTone(chat), photo: avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null) };
-}
 
 function CallScreen({ v, onMin }: { v: CallView; onMin: () => void }) {
   const peer = usePeer(v);

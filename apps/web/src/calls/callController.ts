@@ -5,6 +5,7 @@ import { getPrefs } from '../prefs';
 import { CallCryptoError, commitOf, deriveSession, ephemeral, type Ephemeral, type Session } from './callCrypto';
 import { failureOf, getCamera, getMic, stopStream, VIDEO_BITRATE } from './media';
 import { soundSink, sounds, warmCallSounds } from './sounds';
+import { closeCallNotification, parseCallHash, showCallNotification, type CallIntent } from './callNotify';
 
 /**
  * Звонок 1:1 на странице (docs/plans/2026-11-06-relay-calls.md). RTCPeerConnection в воркере нет, поэтому звонок
@@ -86,6 +87,9 @@ let send: Send = async () => { throw new Error('calls not started'); };
 let me = 0;
 let cur: Active | null = null;
 let incoming: CallInfo | null = null;   // показанный здесь входящий, пока его не приняли в этой вкладке
+// вкладку открыли из уведомления о звонке (#call=…): принять / показать этот звонок, когда сервер его отдаст
+let intent: CallIntent | null = typeof location !== 'undefined' ? parseCallHash(location.hash) : null;
+if (intent) history.replaceState(history.state, '', location.pathname + location.search);
 
 const vol = () => getPrefs().calls.volume;
 const view = (patch: Partial<CallView>) => {
@@ -155,6 +159,7 @@ export async function acceptCall(withVideo: boolean): Promise<void> {
   const release = await takeLock('relay-call');
   if (!release) return;   // ответила другая вкладка
   stopRing();
+  closeCallNotification(inc.callId);
   const a = fresh({ callId: inc.callId, chatId: inc.chatId, peerId: inc.caller, outgoing: false, video: inc.video, phase: 'exchanging' }, inc.caller, me);
   a.commit = inc.commit;
   a.releaseLock = release;
@@ -189,15 +194,38 @@ function showIncoming(c: CallInfo): void {
     if (incoming !== c) return;
     setGlobal({ call: incomingView(c) });
     void send({ op: 'callReceived', callId: c.callId }).catch(() => {});
+    if (intent?.callId === c.callId) {
+      const { accept } = intent;
+      intent = null;
+      if (accept) { void acceptCall(c.video); return; }   // «Принять» в уведомлении
+    } else if (document.hidden) showCallNotification(c, callerTitle(c));
     const release = await takeLock('relay-call-ring');
     if (incoming !== c) { release?.(); return; }
     if (release) { ringRelease = release; const p = getPrefs().calls; await soundSink(p.speaker); sounds.ringtone(p.ringtone, p.volume); }
   })();
 }
 
+/** Имя звонящего для уведомления: название личного чата; «скрывать текст в уведомлениях» — без имени. */
+function callerTitle(c: CallInfo): string {
+  if (getPrefs().screen.hideNotifyText) return 'Relay';
+  return String(getGlobal().chats.find((x) => x.id === c.chatId)?.title ?? 'Relay');
+}
+
+/** Клик по уведомлению о звонке в уже открытой вкладке (sw.ts → сообщение { type: 'call' }). */
+export function callIntent(callId: string, accept: boolean): void {
+  if (incoming?.callId === callId && !(cur && !cur.ended)) {
+    closeCallNotification(callId);
+    if (accept) void acceptCall(incoming.video);
+    return;
+  }
+  intent = { callId, accept };
+  void resync();
+}
+
 let ringRelease: (() => void) | null = null;
 function stopRing(): void { if (ringRelease) { sounds.stop(); ringRelease(); ringRelease = null; } }
 function dismissIncoming(): void {
+  if (incoming) closeCallNotification(incoming.callId);
   incoming = null;
   stopRing();
   if (!cur || cur.ended) setGlobal({ call: null });
