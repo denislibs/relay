@@ -127,10 +127,12 @@ services:
     networks: [data]
 
   # пароль — в конфиг-файл при старте (от root, файл 600 у valkey), не аргументом valkey-server
+  # rm -f: после перезапуска контейнера файл от прошлого старта принадлежит valkey, а fs.protected_regular не даёт
+  # root перезаписать чужой файл в /tmp — без удаления Valkey падает после каждой перезагрузки сервера
   valkey:
     ports: !reset []
     secrets: [valkey_password]
-    entrypoint: ["sh", "-c", "umask 077 && printf 'requirepass %s\\n' \"$$(cat /run/secrets/valkey_password)\" > /tmp/valkey.conf && chown valkey /tmp/valkey.conf && exec docker-entrypoint.sh valkey-server /tmp/valkey.conf \"$$@\"", "--"]
+    entrypoint: ["sh", "-c", "rm -f /tmp/valkey.conf && umask 077 && printf 'requirepass %s\\n' \"$$(cat /run/secrets/valkey_password)\" > /tmp/valkey.conf && chown valkey /tmp/valkey.conf && exec docker-entrypoint.sh valkey-server /tmp/valkey.conf \"$$@\"", "--"]
     command: ["--save", "", "--appendonly", "no", "--port", "0", "--tls-port", "6379",
               "--tls-cert-file", "/certs/valkey.pem", "--tls-key-file", "/certs/valkey-key.pem", "--tls-ca-cert-file", "/certs/ca.pem",
               "--tls-auth-clients", "no"]
