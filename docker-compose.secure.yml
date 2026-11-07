@@ -144,6 +144,9 @@ services:
 
   # учётка S3 — из секретов, без Admin (бакет создаёт s3-init через мастер); S3 — только https
   s3:
+    # init (tini) процессом №1: проверка ниже — busybox wget по https, его ssl_client после выхода wget достаётся
+    # процессу №1, а weed детей не хоронит — зомби каждые 2 с, через ~5 ч лимит процессов и S3 не отвечает (2026-11-07)
+    init: true
     entrypoint: ["sh", "/s3-secure.sh"]
     command: []
     environment:
@@ -294,6 +297,7 @@ services:
     restart: unless-stopped
 
   proxy:
+    init: true   # проверка — busybox wget по https (см. s3): зомби ssl_client хоронит init, а не nginx
     ports: !override ["${RELAY_HTTPS_PORT:-443}:443", "${RELAY_HTTP_PORT:-80}:80", "${RELAY_S3_PORT:-8333}:8333"]
     volumes: !override
       - ./docker/nginx/production.conf:/etc/nginx/http.d/default.conf:ro

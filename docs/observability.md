@@ -157,6 +157,7 @@ nginx или свой; тот же id — в заголовке ответа), `
 | `RelayJobsStuck` (warning) | старейшая готовая задача ждёт > 10 мин | воркер не успевает или стоит | `deploy/compose.sh ps worker`; забит ли пул видео/фото |
 | `RelayTelegramDeliveryFailed` (critical) | код входа не ушёл (`failed`) или упёрся в дневной предел (`capped`) | люди не могут войти | логи воркера `grep 'code delivery'`; `capped` — поднять `TELEGRAM_DAILY_CAP`; `failed` — токен, бот заблокирован, сеть |
 | `RelayDeployRolledBack` (critical) | шлёт `deploy.sh`, когда наблюдение после выката откатило сборку | новая сборка хуже прежней: причина — в тексте | лог шага deploy в Actions; починить и выкатить заново ([deploy.md](deploy.md), «Наблюдение после выката») |
+| `RelayZombieProcesses` (warning) | зомби-процессов на хосте > 100, 10 мин | процесс №1 какого-то контейнера не хоронит детей; через часы — лимит процессов, контейнер перестаёт запускать что-либо | найти родителя (`ps -eo ppid,stat`), контейнеру `init: true` в compose, перезапустить |
 | `RelayHostMemoryLow` (warning) | свободно < 10 % памяти, 10 мин | скоро OOM | панель «Память контейнеров»; первыми растут worker (ffmpeg) и postgres |
 
 Проверить доставку тревог без поломки: `deploy/compose.sh exec alertmanager amtool alert add test severity=warning --annotation=summary=проверка --alertmanager.url=http://127.0.0.1:9093`.

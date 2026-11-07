@@ -98,3 +98,13 @@ groups:
         annotations:
           summary: "Свободной памяти на хосте {{ $value | humanizePercentage }}"
           action: "Память по контейнерам — панель «Память»; первыми растут worker (ffmpeg) и postgres."
+
+      # зомби копятся, когда процесс №1 контейнера не хоронит детей (S3, 2026-11-07: +1 каждые 2 с от проверки
+      # здоровья, через ~5 ч — лимит процессов, контейнер не запускает ничего нового). Норма — единицы
+      - alert: RelayZombieProcesses
+        expr: node_processes_state{state="Z"} > 100
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Зомби-процессов на хосте: {{ $value }}"
+          action: "ps -eo ppid,stat | awk '$2 ~ /^Z/ {print $1}' | sort | uniq -c — чей родитель; контейнеру — init: true, перезапустить его."
