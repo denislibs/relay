@@ -1,11 +1,12 @@
 import type { ProfilePhoto } from '@relay/protocol';
-import { Avatar, Icon, Presence } from '@relay/ui';
+import { Avatar, Icon, peerTone, Presence } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { hangup, toggleMic, type CallView } from '../../calls/callController';
 import { callStatus } from '../../calls/callText';
 import { setGlobal, useGlobal } from '../../global';
 import { avatarPhoto } from '../../profilePhoto';
 import { chatTone } from '../format';
+import { useUser } from '../../settingsData';
 
 /**
  * Свёрнутый звонок — плашка над шапкой чата (как в Telegram Web): шапка плавно уезжает вниз, ничего не перекрыто.
@@ -44,9 +45,16 @@ export function useNow(on: boolean): number {
   return now;
 }
 
-export function CallPlate({ v, floating = false }: { v: CallView; floating?: boolean }) {
+/** Собеседник: по личному чату; вкладка только открылась (из уведомления о звонке) и чатов ещё нет — по профилю. */
+export function usePeer(v: CallView) {
   const chat = useGlobal((s) => s.chats.find((c) => c.id === v.chatId));
-  const name = (chat?.title as string) || 'Собеседник';
+  const user = useUser(chat ? null : v.peerId);
+  if (!chat && user) return { name: String(user.name ?? '') || 'Собеседник', tone: peerTone(v.peerId), photo: avatarPhoto((user.photo as ProfilePhoto | null) ?? null) };
+  return { name: (chat?.title as string) || 'Собеседник', tone: chatTone(chat), photo: avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null) };
+}
+
+export function CallPlate({ v, floating = false }: { v: CallView; floating?: boolean }) {
+  const peer = usePeer(v), name = peer.name;
   const now = useNow(v.phase === 'active');
   const state = v.phase === 'active' ? (v.mic ? 'is-talking' : 'is-muted') : 'is-connecting';
   return (
@@ -55,7 +63,7 @@ export function CallPlate({ v, floating = false }: { v: CallView; floating?: boo
         <Icon name={v.mic ? 'micFilled' : 'micOff'} size={22} />
       </button>
       <button type="button" class="app-callplate-center" aria-label="Открыть звонок" onClick={() => setGlobal({ callMin: false })}>
-        <Avatar name={name} tone={chatTone(chat)} size={30} {...avatarPhoto((chat?.photo as ProfilePhoto | null) ?? null)} />
+        <Avatar name={name} tone={peer.tone} size={30} {...peer.photo} />
         <b>{name}</b>
         <span aria-live={v.phase === 'active' ? 'off' : 'polite'}>{callStatus(v, now)}</span>
       </button>

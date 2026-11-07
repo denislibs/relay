@@ -1387,7 +1387,8 @@ export class Engine {
         // запрос, принятие и «мой звонок» ждут ответа сервера (reqId ставит request), остальное — без ответа
         const f = a.frame;
         if (f.op === 'callRequest' || f.op === 'callAccept' || f.op === 'callGet' || f.op === 'groupCallStart' || f.op === 'groupCallJoin' || f.op === 'groupCallGet'
-          || f.op === 'groupCallEnd' || f.op === 'groupCallMute' || f.op === 'groupCallKick') return this.request({ ...f, reqId: '' });
+          || f.op === 'groupCallEnd' || f.op === 'groupCallMute' || f.op === 'groupCallKick' || f.op === 'groupCallSettings' || f.op === 'groupCallAllow' || f.op === 'groupCallConference' || f.op === 'groupCallInvite'
+          || f.op === 'groupCallLink' || f.op === 'groupCallLinkPreview' || f.op === 'groupCallLinkJoin' || f.op === 'groupCallDecide') return this.request({ ...f, reqId: '' });
         this.transport.send(f);
         return null;
       }
@@ -1949,6 +1950,7 @@ export class Engine {
         return;
       case 'callIncoming': case 'callRinging': case 'callAccepted': case 'callConfirm': case 'callSignal': case 'callEnded':
       case 'groupCallState': case 'groupCallKeys': case 'groupCallEnded': case 'groupCallMuted': case 'groupCallKicked':
+      case 'groupCallInvited': case 'groupCallApproved': case 'groupCallRefused':
         this.callEvent(f);
         return;
       case 'sessionTerminated':

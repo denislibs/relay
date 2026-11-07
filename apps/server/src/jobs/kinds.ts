@@ -4,7 +4,7 @@ import { deliver } from '../domain/devOutbox';
 import { sweepPendingUploads } from '../domain/files';
 import { collectGarbage, purgeObjects } from '../domain/storageGc';
 import { sweepInactive } from '../domain/sessions';
-import { deliverPush, planPush, planPushPage, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
+import { deliverPush, planCallPush, planInvitePush, planPush, planPushPage, planReminderPush, type PushCursor, type PushMessage, type PushPayload } from '../domain/push';
 import { reindexStep, syncMessage, syncMessages } from '../search/messagesIndex';
 import { register, registerBatch } from './handlers';
 import { applyLinkPreview } from '../domain/messages';
@@ -23,7 +23,8 @@ import { publishScheduled, sweepScheduled } from '../domain/scheduled';
 import { destroyExpiredKeys, expireStep } from '../domain/autoDelete';
 import { trimAdminLog } from '../domain/adminLog';
 import { expireRing } from '../domain/calls';
-import { checkGroupCall } from '../domain/groupCalls';
+import { CALL_RING_MS } from '@relay/protocol';
+import { checkGroupCall, expireGroupCallPlan, planReminders } from '../domain/groupCalls';
 import { publishTopic } from '../bus';
 
 /** Подписок на страницу push.message (тесты уменьшают). */
@@ -262,6 +263,31 @@ register('linkPreview.expire', async () => {
 
 // звонок без ответа CALL_RING_MS — пропущен (если ещё звонит); кадр callEnded — через шину процессам с сокетами
 register('call.ring', async (p: { callId: string }) => expireRing(publishTopic, String(p.callId)));
+
+// звонок адресату без живых вкладок (domain/calls.ts): доставка сразу, без push.deliver — повтор позже звонка не нужен.
+// Пуш о звонке живёт, пока звонят (ttl), — опоздавший push-сервис не позвонит через час
+register('push.call', async (p: { callId: string; chatId: number; caller: number; callee: number; video: boolean; end?: boolean; missed?: boolean }) => {
+  const targets = await planCallPush(p);
+  const ttl = p.end ? 3600 : Math.ceil(CALL_RING_MS / 1000);
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, ttl)));
+  for (const r of res) if (r.status === 'rejected') console.warn('push.call:', r.reason);
+});
+
+// запланированный звонок: в срок — пуш напомнить (кто нажал «Напомнить» и без вкладок); не начатый — снять (groupCalls.ts)
+register('groupcall.remind', async (p: { planId: string }) => {
+  const r = await planReminders(String(p.planId));
+  if (!r) return;
+  const targets = await planReminderPush(r.chatId, r.users, r.title);
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, 3600)));
+  for (const x of res) if (x.status === 'rejected') console.warn('groupcall.remind:', x.reason);
+});
+// зовут в звонок без группы: пуш тем, у кого нет вкладок (живёт, пока звонок свежий — час)
+register('push.gcallInvite', async (p: { callId: string; from: number; users: number[] }) => {
+  const targets = await planInvitePush(String(p.callId), Number(p.from), (p.users ?? []).map(Number));
+  const res = await Promise.allSettled(targets.map((t) => deliverPush(t.endpoint, t.push, 600)));
+  for (const x of res) if (x.status === 'rejected') console.warn('push.gcallInvite:', x.reason);
+});
+register('groupcall.planExpire', async (p: { planId: string }) => expireGroupCallPlan(String(p.planId)));
 
 // групповой звонок: ушедшие без пинга — из состава, пустой — завершить (domain/groupCalls.ts)
 register('groupcall.check', async (p: { callId: string }) => checkGroupCall(publishTopic, String(p.callId)));

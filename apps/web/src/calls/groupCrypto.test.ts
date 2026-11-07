@@ -28,3 +28,18 @@ test('a server swapping a public key cannot read the key, and the emoji differ',
   // а без подмены порядок состава не важен
   expect(await membersEmoji(callId, [{ session: 2, pub: b.pub }, { session: 1, pub: a.pub }])).toEqual(seenByB);
 });
+
+test('call data (reactions, chat): sealed with the sender key of the epoch; another sender, epoch or key cannot open it', async () => {
+  const { sealData, openData, dataEpoch } = await import('./groupCrypto');
+  const key = crypto.getRandomValues(new Uint8Array(32)), other = crypto.getRandomValues(new Uint8Array(32));
+  const box = await sealData(key, { callId: 'c1', epoch: 4, identity: 'u1-s1' }, { t: 'm', x: 'привет' });
+  expect(new TextDecoder().decode(box)).not.toContain('привет');
+  expect(dataEpoch(box)).toBe(4);
+  expect(await openData(key, { callId: 'c1', identity: 'u1-s1' }, box)).toEqual({ t: 'm', x: 'привет' });
+  expect(await openData(key, { callId: 'c1', identity: 'u2-s2' }, box)).toBeNull();   // выдать за другого нельзя
+  expect(await openData(key, { callId: 'c2', identity: 'u1-s1' }, box)).toBeNull();
+  expect(await openData(other, { callId: 'c1', identity: 'u1-s1' }, box)).toBeNull();
+  const forged = new TextEncoder().encode(new TextDecoder().decode(box).replace('"e":4', '"e":5'));
+  expect(await openData(key, { callId: 'c1', identity: 'u1-s1' }, forged)).toBeNull();
+  expect(dataEpoch(new TextEncoder().encode('мусор'))).toBeNull();
+});

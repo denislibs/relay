@@ -96,6 +96,7 @@ export interface LocalChat {
   autoDeleteSec?: number | null;   // автоудаление: срок новых сообщений в секундах (значение сервера), null — выключено
   theme?: string | null;       // тема чата: id готовой темы (GET /themes), общая для всех участников
   groupCall?: import('@relay/protocol').GroupCallSummary | null;   // группа: идёт звонок (плашка «Идёт звонок»)
+  groupCallPlan?: import('@relay/protocol').GroupCallPlan | null;  // группа: запланированный звонок
   pinnedAt?: number | null;    // чат закреплён (мс; позже закреплённый — выше), null/нет — нет
   archived?: boolean;          // в архиве: не в «Все» и папках, а под строкой «Архив»
   archivedAtId?: number;       // граница архива (max id сообщений при архивировании): сообщение новее — операция unarchive

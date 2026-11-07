@@ -15,7 +15,8 @@ const engineHosts = join(root, '..', '..', 'packages', 'sync-engine', 'src', 'ho
 const dist = process.env.WEB_OUT ?? join(root, 'dist');   // WEB_OUT — собрать в другую папку (проверка продакшен-сборки)
 const isWatch = process.argv.includes('--watch');
 
-const HASHED = /-[a-z0-9]{8,}\.(js|css|wasm)(\.map|\.gz|\.br)?$/;   // имя с хэшем: кэшируется навсегда (docker/nginx)
+const MEDIAPIPE_FILES = ['selfie_segmentation.binarypb', 'selfie_segmentation_landscape.tflite', 'selfie_segmentation_solution_simd_wasm_bin.js', 'selfie_segmentation_solution_simd_wasm_bin.wasm', 'selfie_segmentation_solution_wasm_bin.js', 'selfie_segmentation_solution_wasm_bin.wasm'];
+const HASHED = /-[a-z0-9]{8,}\.(js|css|wasm|tflite|binarypb)(\.map|\.gz|\.br)?$/;   // имя с хэшем: кэшируется навсегда (docker/nginx)
 const LEGACY = ['main.js', 'main.js.map', 'shared.worker.js', 'shared.worker.js.map', 'dedicated.worker.js', 'dedicated.worker.js.map', 'spoiler.worker.js', 'spoiler.worker.js.map', 'articleEditor.js', 'articleEditor.js.map', 'relay.css', 'tokens.css', 'app.css', 'boot.js'];
 const HISTORY = '.assets-history.json';   // файлы двух последних сборок: открытые вкладки прежней ещё догружают свои
 
@@ -29,7 +30,7 @@ async function hashedCss(src: string, dir: string, name: string): Promise<string
 }
 async function hashedWrite(body: Uint8Array | string, dir: string, name: string): Promise<string> {
   const bytes = typeof body === 'string' ? new TextEncoder().encode(body) : body;
-  const file = name.replace(/\.(css|wasm|js)$/, (ext) => '-' + Bun.hash(bytes).toString(36).padStart(8, '0').slice(0, 10) + ext);
+  const file = name.replace(/\.(css|wasm|js|tflite|binarypb)$/, (ext) => '-' + Bun.hash(bytes).toString(36).padStart(8, '0').slice(0, 10) + ext);
   await Bun.write(join(dir, file), bytes);
   return '/' + file;
 }
@@ -92,6 +93,9 @@ async function build(): Promise<void> {
   await cp(join(root, 'public'), tmp, { recursive: true });
   // tlottie (MIT, собран из исходников — packages/relay-ui/vendor/tlottie/BUILD.md): имя с хэшем, кэш навсегда
   for (const w of ['tlottie.wasm', 'tlottie-no-simd.wasm']) assets[w] = await hashedCopy(join(ui, 'vendor', 'tlottie', w), tmp, w);
+  // размытие фона в звонке (src/calls/background.ts): MediaPipe Selfie Segmentation (Apache-2.0) — граф, модель и wasm
+  // своим адресом с хэшем (SW сверяет байты); грузятся только при первом включении размытия
+  for (const f of MEDIAPIPE_FILES) assets['mediapipe/' + f] = await hashedCopy(join(root, 'node_modules', '@mediapipe', 'selfie_segmentation', f), tmp, f);
   await rm(join(tmp, 'app.css'), { force: true });
   const css = {
     'tokens.css': await hashedCss(join(ui, 'tokens.css'), tmp, 'tokens.css'),

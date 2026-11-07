@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@mediapipe/selfie_segmentation": "0.1.1675465747",
     "@relay/protocol": "workspace:*",
     "@relay/sync-engine": "workspace:*",
     "@relay/ui": "workspace:*",

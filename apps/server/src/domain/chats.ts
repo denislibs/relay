@@ -1,5 +1,5 @@
-import { activeGroupCalls } from './groupCalls';
-import type { GroupCallSummary } from '@relay/protocol';
+import { activeGroupCalls, groupCallPlans } from './groupCalls';
+import type { GroupCallPlan, GroupCallSummary } from '@relay/protocol';
 import { peerKey } from '../crypto/peerKey';
 import { shredHistory } from './shred';
 import { dropScheduledInChat } from './scheduled';
@@ -284,6 +284,7 @@ export type ChatSummary = {
   saved?: true;         // «Избранное»: чат с самим собой (domain/saved.ts); peer — null
   theme?: string | null;   // тема чата (id из каталога GET /themes)
   groupCall?: GroupCallSummary | null;   // группа: идёт звонок (плашка «Идёт звонок»)
+  groupCallPlan?: GroupCallPlan | null;  // группа: запланированный звонок
   draft?: { text: string; at: string; entities?: Entity[] } | null; // черновик этого пользователя (синхронизируется между устройствами)
   sortAt?: string; // ключ сортировки списка (последнее сообщение или создание чата) — из него курсор страницы
   muteUntil?: number | null; // уведомления выключены: мс эпохи, 0 — навсегда, null — включены
@@ -413,6 +414,8 @@ export async function listChats(userId: number, opts: ListOpts = {}): Promise<Ch
   // идущие групповые звонки — плашка «Идёт звонок» с первого снимка (дальше — событием groupCall журнала группы)
   const calls = await activeGroupCalls(list.filter((c) => c.kind === 'group').map((c) => c.id)).catch(() => new Map());
   for (const c of list) if (c.kind === 'group') (c as ChatSummary).groupCall = calls.get(c.id) ?? null;
+  const plans = await groupCallPlans(list.filter((c) => c.kind === 'group').map((c) => c.id)).catch(() => new Map());
+  for (const c of list) if (c.kind === 'group') (c as ChatSummary).groupCallPlan = plans.get(c.id) ?? null;
   return list;
 }
 

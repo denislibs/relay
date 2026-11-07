@@ -175,3 +175,161 @@ test('LiveKit token is HS256 over header.body with the API secret', () => {
   expect(JSON.parse(Buffer.from(b, 'base64url').toString())).toEqual({ iss: 'k', sub: 'u1-s2', nbf: 990, exp: 1060, video: { room: 'r1', roomJoin: true } });
   expect(createHmac('sha256', 'sec').update(`${h}.${b}`).digest('base64url')).toBe(sig);
 });
+
+test('«new members without mic»: only an admin sets it; newcomers join gagged (not admins), turning it off frees them; data channel allowed in the pass', async () => {
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const g = await chat(a, 'group', [a.userId, b.userId, c.userId]);
+  await own(g, a.userId);
+  const wa = await connect(a.token), wb = await connect(b.token), wc = await connect(c.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  const ja = await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false }) as { token: string };
+  const grant = JSON.parse(Buffer.from(ja.token.split('.')[1], 'base64url').toString()).video;
+  expect(grant.canPublishData).toBe(true);   // реакции и чат звонка — каналом данных LiveKit (шифрует клиент)
+  await expect(call(wb, { op: 'groupCallSettings', callId, joinMuted: true })).rejects.toThrow('forbidden');
+  const on = state(wa, 1);
+  expect(await call(wa, { op: 'groupCallSettings', callId, joinMuted: true })).toEqual({ ok: true });
+  expect((await on).joinMuted).toBe(true);
+
+  const two = state(wa, 2);
+  await call(wb, { op: 'groupCallJoin', callId, pub: PUB('b'), muted: false, video: false });
+  const st = await two;
+  expect(st.members.find((m) => m.userId === b.userId)).toMatchObject({ muted: true, mutedByAdmin: true, mutedOnJoin: true });
+  expect(st.members.find((m) => m.userId === a.userId)?.mutedByAdmin).toBeUndefined();
+  // заглушённый правилом не включит микрофон сам
+  const upd = state(wa, 2);
+  wb.send(JSON.stringify({ op: 'groupCallUpdate', callId, muted: false, video: false, screen: false, hand: false }));
+  expect((await upd).members.find((m) => m.userId === b.userId)?.muted).toBe(true);
+  // Веру админ заглушил лично — выключение правила её не освобождает
+  const three = state(wa, 3);
+  await call(wc, { op: 'groupCallJoin', callId, pub: PUB('c'), muted: false, video: false });
+  await three;
+  await call(wa, { op: 'groupCallMute', callId, userId: c.userId });
+  const off = nextFrame(wa, (f) => f.op === 'groupCallState' && !f.joinMuted) as Promise<Extract<ServerFrame, { op: 'groupCallState' }>>;
+  await call(wa, { op: 'groupCallSettings', callId, joinMuted: false });
+  const after = await off;
+  expect(after.members.find((m) => m.userId === b.userId)?.mutedByAdmin).toBe(false);
+  expect(after.members.find((m) => m.userId === c.userId)?.mutedByAdmin).toBe(true);
+  wa.close(); wb.close(); wc.close();
+});
+
+test('raised hand → the admin allows speaking; strangers cannot', async () => {
+  const a = await login('Анна'), b = await login('Борис');
+  const g = await chat(a, 'group', [a.userId, b.userId]);
+  await own(g, a.userId);
+  const wa = await connect(a.token), wb = await connect(b.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  await call(wa, { op: 'groupCallSettings', callId, joinMuted: true });
+  const two = state(wa, 2);
+  await call(wb, { op: 'groupCallJoin', callId, pub: PUB('b'), muted: false, video: false });
+  expect((await two).members.find((m) => m.userId === b.userId)?.mutedByAdmin).toBe(true);
+  await expect(call(wb, { op: 'groupCallAllow', callId, userId: b.userId })).rejects.toThrow('forbidden');
+  const freed = nextFrame(wa, (f) => f.op === 'groupCallState' && f.members.some((m) => m.userId === b.userId && !m.mutedByAdmin)) as Promise<Extract<ServerFrame, { op: 'groupCallState' }>>;
+  expect(await call(wa, { op: 'groupCallAllow', callId, userId: b.userId })).toEqual({ ok: true });
+  expect((await freed).members.find((m) => m.userId === b.userId)?.mutedOnJoin).toBeUndefined();
+  wa.close(); wb.close();
+});
+
+test('scheduled call: admin plans it (history line, banner plan), members toggle the reminder, the reminder job picks them, start takes the title and drops the plan', async () => {
+  const { planReminders, expireGroupCallPlan } = await import('../src/domain/groupCalls');
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера');
+  const g = await chat(a, 'group', [a.userId, b.userId, c.userId]);
+  await own(g, a.userId);
+  const http = (l: Login, method: string, path: string, body?: unknown) => fetch(`${base}${path}`, { method, headers: { cookie: `relay_session=${l.token}`, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const at = Date.now() + 3600_000;
+  expect((await http(b, 'POST', `/groups/${g}/call-plan`, { title: 'Созвон', at })).status).toBe(403);
+  expect((await http(a, 'POST', `/groups/${g}/call-plan`, { title: 'Созвон', at: Date.now() + 1000 })).status).toBe(400);   // слишком скоро
+  const plan = await (await http(a, 'POST', `/groups/${g}/call-plan`, { title: '  Созвон   по   пятницам ', at })).json();
+  expect(plan).toMatchObject({ title: 'Созвон по пятницам', at, by: a.userId });
+  expect((await service(g)).at(-1)).toMatchObject({ sender: a.userId, state: 'scheduled', at, title: 'Созвон по пятницам' });
+  expect((await chatEventsOf(g, 'groupCall' as never)).at(-1)).toMatchObject({ call: null, plan: { id: plan.id, at } });
+  expect(await (await http(b, 'GET', `/groups/${g}/call-plan`)).json()).toEqual({ plan, remind: false });
+  expect(await (await http(b, 'POST', `/groups/${g}/call-plan/remind`, { on: true })).json()).toEqual({ remind: true });
+  expect((await (await http(a, 'GET', `/groups/${g}/call-plan`)).json()).remind).toBe(true);   // поставивший — сразу в напоминаемых
+  expect((await planReminders(plan.id))?.users.sort()).toEqual([a.userId, b.userId].sort());
+  // список чатов — с планом
+  const list = await (await http(c, 'GET', '/chats')).json() as { id: number; groupCallPlan?: unknown }[];
+  expect(list.find((x) => x.id === g)?.groupCallPlan).toMatchObject({ id: plan.id });
+
+  // начали звонок — название от плана, плана больше нет
+  const wa = await connect(a.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  expect((await call(wa, { op: 'groupCallGet', chatId: g })).call).toMatchObject({ callId, title: 'Созвон по пятницам' });
+  expect(await (await http(b, 'GET', `/groups/${g}/call-plan`)).json()).toEqual({ plan: null, remind: false });
+  expect(await planReminders(plan.id)).toBeNull();
+  // название идущего — админ меняет
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  const renamed = nextFrame(wa, (f) => f.op === 'groupCallState' && f.title === 'Планёрка');
+  await call(wa, { op: 'groupCallSettings', callId, title: 'Планёрка' });
+  await renamed;
+
+  // снятие и истечение
+  await call(wa, { op: 'groupCallEnd', callId });
+  const p2 = await (await http(a, 'POST', `/groups/${g}/call-plan`, { at })).json();
+  expect(p2.title).toBeNull();
+  expect((await http(b, 'DELETE', `/groups/${g}/call-plan`)).status).toBe(403);
+  await expireGroupCallPlan(p2.id);
+  expect((await (await http(a, 'GET', `/groups/${g}/call-plan`)).json()).plan).toBeNull();
+  wa.close();
+});
+
+test('conference: invitees (by the calls privacy rule) may join, strangers not; the creator manages it; it leaves no chat history', async () => {
+  const { writeRule } = await import('../src/domain/privacy');
+  const a = await login('Анна'), b = await login('Борис'), c = await login('Вера'), x = await login('Чужой');
+  await chat(a, 'direct', [a.userId, b.userId]);
+  await sql.begin((tx) => writeRule(tx, c.userId, 'calls', { mode: 'nobody', allow: [], deny: [] }));
+  const wa = await connect(a.token), wb = await connect(b.token), wx = await connect(x.token);
+  const invited = nextFrame(wb, (f) => f.op === 'groupCallInvited');
+  const { callId } = await call(wa, { op: 'groupCallConference', invite: [b.userId, c.userId], fromCall: crypto.randomUUID() }) as { callId: string };
+  expect(await invited).toMatchObject({ op: 'groupCallInvited', callId, from: a.userId });
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  const two = state(wa, 2);
+  expect(await call(wb, { op: 'groupCallJoin', callId, pub: PUB('b'), muted: false, video: false })).toMatchObject({ chatId: 0 });
+  expect((await two).startedBy).toBe(a.userId);
+  await expect(call(wx, { op: 'groupCallJoin', callId, pub: PUB('x'), muted: false, video: false })).rejects.toThrow('not_member');
+  const wc = await connect(c.token);   // Вера запретила звонки — её не позвали
+  await expect(call(wc, { op: 'groupCallJoin', callId, pub: PUB('c'), muted: false, video: false })).rejects.toThrow('not_member');
+  await expect(call(wb, { op: 'groupCallSettings', callId, joinMuted: true })).rejects.toThrow('forbidden');
+  expect(await call(wa, { op: 'groupCallSettings', callId, joinMuted: true })).toEqual({ ok: true });   // создатель — управляет
+  // Борис зовёт Чужого — теперь и он может войти
+  expect(await call(wb, { op: 'groupCallInvite', callId, users: [x.userId] })).toEqual({ invited: [x.userId] });
+  await call(wx, { op: 'groupCallJoin', callId, pub: PUB('x'), muted: false, video: false });
+  await call(wa, { op: 'groupCallEnd', callId });
+  const [row] = await sql`select chat_id, kind, ended_at from group_calls where id = ${callId}`;
+  expect(row).toMatchObject({ chat_id: null, kind: 'conference' });
+  expect(row.ended_at).not.toBeNull();
+  expect((await sql`select user_id from group_call_members where call_id = ${callId} order by user_id`).map((r) => Number(r.user_id))).toEqual([a.userId, b.userId, x.userId].sort((p, q) => p - q));
+  wa.close(); wb.close(); wc.close(); wx.close();
+});
+
+test('call link: outsiders join a group call by link (only the call); approval queue; revoke; preview never leaks a dead link', async () => {
+  const a = await login('Анна'), b = await login('Борис'), x = await login('Чужой'), y = await login('Гость');
+  const g = await chat(a, 'group', [a.userId, b.userId]);
+  await own(g, a.userId);
+  const wa = await connect(a.token), wb = await connect(b.token), wx = await connect(x.token), wy = await connect(y.token);
+  const { callId } = await call(wa, { op: 'groupCallStart', chatId: g }) as { callId: string };
+  await call(wa, { op: 'groupCallJoin', callId, pub: PUB('a'), muted: false, video: false });
+  await expect(call(wb, { op: 'groupCallLink', callId, approval: false })).rejects.toThrow('forbidden');   // в звонке группы — только админ
+  const { token } = await call(wa, { op: 'groupCallLink', callId, approval: false }) as { token: string };
+  expect(token).toMatch(/^[A-Za-z0-9_-]{22}$/);
+  expect(await call(wx, { op: 'groupCallLinkPreview', token })).toMatchObject({ callId, chatId: g, chatTitle: 'Группа', count: 1, approval: false, member: false });
+  expect(await call(wx, { op: 'groupCallLinkJoin', token })).toEqual({ callId, chatId: g });
+  await call(wx, { op: 'groupCallJoin', callId, pub: PUB('x'), muted: false, video: false });
+  await expect(call(wx, { op: 'groupCallGet', chatId: g })).rejects.toThrow('not_member');   // в группу ссылка не пускает
+
+  const appr = await call(wa, { op: 'groupCallLink', callId, approval: true }) as { token: string };
+  const asked = nextFrame(wa, (f) => f.op === 'groupCallState' && (f.requests ?? []).some((r) => r.id === y.userId && r.name === 'Гость'));
+  expect(await call(wy, { op: 'groupCallLinkJoin', token: appr.token })).toEqual({ pending: true });
+  await asked;
+  await expect(call(wy, { op: 'groupCallJoin', callId, pub: PUB('y'), muted: false, video: false })).rejects.toThrow('not_member');
+  const ok = nextFrame(wy, (f) => f.op === 'groupCallApproved');
+  await expect(call(wb, { op: 'groupCallDecide', callId, userId: y.userId, approve: true })).rejects.toThrow('forbidden');
+  await call(wa, { op: 'groupCallDecide', callId, userId: y.userId, approve: true });
+  expect(await ok).toMatchObject({ callId, chatId: g });
+  await call(wy, { op: 'groupCallJoin', callId, pub: PUB('y'), muted: false, video: false });
+
+  await call(wa, { op: 'groupCallLink', callId, approval: false, revoke: true });
+  await expect(call(wx, { op: 'groupCallLinkPreview', token })).rejects.toThrow('not_found');
+  await expect(call(wx, { op: 'groupCallLinkPreview', token: 'A'.repeat(22) })).rejects.toThrow('not_found');
+  wa.close(); wb.close(); wx.close(); wy.close();
+});

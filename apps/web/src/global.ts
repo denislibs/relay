@@ -78,8 +78,11 @@ export interface GlobalState {
   infoOpen: boolean;   // правая панель «Информация»
   call: CallView | null;   // звонок: входящий, исходящий или разговор (calls/callController.ts)
   callMin: boolean;        // звонок свёрнут в плашку над шапкой чата (ui/call/CallSlot.tsx)
+  callsUnseen: number;     // новые пропущенные звонки — бейдж «Звонки» в меню (calls/callsList.ts)
   groupCall: GroupCallView | null;   // групповой звонок, в котором я сейчас (calls/groupCall.ts)
   groupCallMin: boolean;             // свёрнут в плашку над шапкой
+  groupInvite: { callId: string; from: number; count: number } | null;   // зовут в звонок без группы (экран «… зовёт в звонок»)
+  callLink: { token: string; preview: import('@relay/protocol').GroupCallLinkPreview | null; pending: boolean; failed: boolean } | null;   // открыли ссылку на звонок
   listLeaving: boolean;   // телефон: чат закрыли — экран уже едет к списку, лента снимется после перехода (data.ts)
   pollResults: { chatId: number; id: number } | null;   // окно «Результаты» неанонимного опроса
   muteTick: number;    // истёк срок «Отключить звук» какого-то чата (mute.ts): повод перерисовать
@@ -179,8 +182,11 @@ let state: GlobalState = {
   infoOpen: false,
   call: null,
   callMin: false,
+  callsUnseen: 0,
   groupCall: null,
   groupCallMin: false,
+  groupInvite: null,
+  callLink: null,
   listLeaving: false,
   muteTick: 0,
   theme: loadTheme(),

@@ -1,16 +1,22 @@
-import type { GroupCallSummary, ProfilePhoto } from '@relay/protocol';
+import type { GroupCallPlan, GroupCallSummary, ProfilePhoto } from '@relay/protocol';
 import { Avatar, Icon, peerTone, Presence, ripple } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import {
-  adminGroupAction, endGroupCallForAll, groupTracks, joinGroupCall, leaveGroupCall, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
-  type GroupCallView, type GroupMemberView,
+  adminGroupAction, answerGroupInvite, CALL_CHAT_MAX, callLinkUrl, decideRequest, inviteToGroupCall, joinByLink, revokeCallLinks, setGroupCallTitle, CALL_REACTIONS, endGroupCallForAll, readCallChat, sendCallChat, sendCallReaction, setJoinMuted, groupTracks, joinGroupCall, leaveGroupCall, setGroupBackground, startGroupCall, toggleGroupCam, toggleGroupHand, toggleGroupMic, toggleGroupScreen,
+  type GroupCallView, type GroupMemberView, type GroupReaction,
 } from '../../calls/groupCall';
 import { callClock } from '../../calls/callText';
-import { setGlobal, useGlobal } from '../../global';
+import { getGlobal, setGlobal, useGlobal } from '../../global';
 import { avatarPhoto } from '../../profilePhoto';
 import { useUser } from '../../settingsData';
 import { chatTone } from '../format';
 import { useNow } from './CallSlot';
+import { CallPlanModal } from './CallPlanModal';
+import { PeoplePicker } from './PeoplePicker';
+import { fetchPlan, setPlanRemind } from '../../calls/callPlans';
+import { whenText } from '../../schedule';
+import { openGroupPip, useAutoPip } from './CallPip';
+import { pipKind } from '../../calls/pip';
 
 /**
  * Групповой звонок (docs/plans/2026-11-07-relay-group-calls.md): экран с плитками и списком участников, плашка над
@@ -24,10 +30,102 @@ const plural = (n: number) => (n % 10 === 1 && n % 100 !== 11 ? 'участни�
 export function GroupCallLayer() {
   const gc = useGlobal((s) => s.groupCall);
   const min = useGlobal((s) => s.groupCallMin);
+  useAutoPip(!!gc && (gc.phase === 'active' || gc.phase === 'reconnecting'), openGroupPip);
   const last = useRef<GroupCallView | null>(null);
   if (gc) last.current = gc;
   const v = gc ?? last.current;
-  return <Presence show={!!gc && !min} exitMs={220}>{v ? <GroupCallScreen v={v} /> : null}</Presence>;
+  const invite = useGlobal((s) => s.groupInvite);
+  const link = useGlobal((s) => s.callLink);
+  return (
+    <>
+      <Presence show={!!gc && !min} exitMs={220}>{v ? <GroupCallScreen v={v} /> : null}</Presence>
+      <Presence show={!!invite && !gc} exitMs={220}>{invite ? <InviteScreen inv={invite} /> : null}</Presence>
+      <Presence show={!!link && !gc} exitMs={220}>{link ? <LinkScreen l={link} /> : null}</Presence>
+    </>
+  );
+}
+
+/** «Анна зовёт в групповой звонок»: Принять / Отклонить (звонит, как входящий). */
+function InviteScreen({ inv }: { inv: NonNullable<ReturnType<typeof getGlobal>['groupInvite']> }) {
+  const u = useUser(inv.from || null);
+  const name = String(u?.name ?? '') || 'Вас';
+  return (
+    <div class="app-call app-gcall-invite" role="dialog" aria-label="Приглашение в звонок" data-phase="incoming">
+      <div class="app-call-who">
+        {inv.from ? <Face userId={inv.from} size={120} /> : <span class="app-gcall-bigicon"><Icon name="users" size={56} /></span>}
+        <b>{inv.from ? name : 'Групповой звонок'}</b>
+        <span class="app-call-status">{inv.from ? 'зовёт в групповой звонок' : 'Вас зовут в групповой звонок'}{inv.count ? ` · ${inv.count} ${plural(inv.count)}` : ''}</span>
+      </div>
+      <div class="app-call-controls">
+        <Btn icon="phoneDown" label="Отклонить" danger onClick={() => answerGroupInvite(false)} />
+        <Btn icon="phone" label="Принять" accept onClick={() => answerGroupInvite(true)} />
+      </div>
+    </div>
+  );
+}
+
+/** Открыли ссылку на звонок: что за звонок, «Войти» (или «Попросить войти» и ожидание, когда пустят). */
+function LinkScreen({ l }: { l: NonNullable<ReturnType<typeof getGlobal>['callLink']> }) {
+  const p = l.preview;
+  const name = p ? (p.title || p.chatTitle || 'Групповой звонок') : '';
+  return (
+    <div class="app-call app-gcall-invite" role="dialog" aria-label="Звонок по ссылке" data-phase="link">
+      <div class="app-call-top"><button type="button" class="app-call-icon" aria-label="Закрыть" onClick={() => setGlobal({ callLink: null })}><Icon name="close" size={22} /></button><span /><span /></div>
+      <div class="app-call-who">
+        {p ? <span class="app-gcfaces app-gcfaces-big">{p.faces.map((id) => <Face key={id} userId={id} size={56} />)}</span> : <span class="app-gcall-bigicon"><Icon name="link" size={56} /></span>}
+        <b>{l.failed ? 'Ссылка не работает' : p ? name : 'Звонок по ссылке'}</b>
+        <span class="app-call-status">
+          {l.failed ? 'Звонок закончился или ссылку отозвали' : l.pending ? 'Ждём, пока вас пустят…' : p ? `${p.count ? `${p.count} ${plural(p.count)}` : 'пока никого'}${p.chatTitle && p.title ? ' · ' + p.chatTitle : ''}` : 'Загрузка…'}
+        </span>
+      </div>
+      <div class="app-call-controls">
+        {p && !l.failed && !l.pending ? <Btn icon="phone" label={p.approval ? 'Попросить войти' : 'Войти'} accept onClick={() => void joinByLink()} /> : null}
+      </div>
+    </div>
+  );
+}
+
+/** Ссылка на звонок: создать (с одобрением или без), скопировать, отозвать все. */
+function LinkPanel({ admin, onClose }: { admin: boolean; onClose: () => void }) {
+  const [approval, setApproval] = useState(true);
+  const [url, setUrl] = useState<string | null>(null);
+  const make = async () => { const u = await callLinkUrl(approval); if (u) { setUrl(u); void navigator.clipboard?.writeText(u).catch(() => {}); } };
+  return (
+    <div class="app-gcall-linkpanel" role="dialog" aria-label="Ссылка на звонок">
+      <label class="app-gcall-setting"><input type="checkbox" checked={approval} onChange={(e) => setApproval((e.target as HTMLInputElement).checked)} /><span>Вход по одобрению</span></label>
+      {url ? <input class="app-gcall-titleedit app-gcall-linkurl" readOnly value={url} aria-label="Ссылка на звонок" onFocus={(e) => (e.target as HTMLInputElement).select()} /> : null}
+      <div class="app-gcall-linkbtns">
+        <button type="button" class="app-gcall-linkbtn" onClick={() => void make()}>{url ? 'Новая ссылка' : 'Создать и скопировать'}</button>
+        {admin ? <button type="button" class="app-gcall-linkbtn is-danger" onClick={() => { void revokeCallLinks(); setUrl(null); }}>Отозвать все</button> : null}
+        <button type="button" class="app-gcall-linkbtn" onClick={onClose}>Готово</button>
+      </div>
+      {url ? <p class="app-gcall-chat-note">Ссылка скопирована. По ней можно войти только в этот звонок, пока он идёт.</p> : null}
+    </div>
+  );
+}
+
+/** Заявки по ссылке: имена; админу — «Пустить» / «Отклонить». */
+function Requests({ list, admin }: { list: { id: number; name: string }[]; admin: boolean }) {
+  return (
+    <div class="app-gcall-requests" aria-label="Хотят войти">
+      <span class="app-gcall-chat-note">Хотят войти</span>
+      {list.map((r) => <RequestRow key={r.id} userId={r.id} name={r.name} admin={admin} />)}
+    </div>
+  );
+}
+function RequestRow({ userId, name, admin }: { userId: number; name: string; admin: boolean }) {
+  return (
+    <div class="app-gcall-row">
+      <Avatar name={name} tone={peerTone(userId)} size={36} />
+      <span class="app-gcall-row-text"><b>{name}</b></span>
+      {admin ? (
+        <span class="app-gcall-row-admin">
+          <button type="button" aria-label={`Пустить: ${name}`} onClick={() => void decideRequest(userId, true)}><Icon name="check" size={18} /></button>
+          <button type="button" aria-label={`Отклонить: ${name}`} onClick={() => void decideRequest(userId, false)}><Icon name="close" size={18} /></button>
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 /** Над шапкой группы: звонок идёт — плашка «Присоединиться»; я в нём и свернул — мой звонок. */
@@ -35,8 +133,9 @@ export function GroupCallSlot({ chatId }: { chatId: number }) {
   const summary = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.groupCall as GroupCallSummary | null | undefined) ?? null);
   const gc = useGlobal((s) => s.groupCall);
   const min = useGlobal((s) => s.groupCallMin);
+  const plan = useGlobal((s) => (s.chats.find((c) => c.id === chatId)?.groupCallPlan as GroupCallPlan | null | undefined) ?? null);
   const mine = !!gc && gc.chatId === chatId && gc.phase !== 'ended';
-  const show = (mine && min) || (!!summary && !mine);
+  const show = (mine && min) || (!!summary && !mine) || (!!plan && !summary && !mine);
   const still = useRef(show);
   if (!show) still.current = false;
   const lastSummary = useRef(summary);
@@ -45,10 +144,35 @@ export function GroupCallSlot({ chatId }: { chatId: number }) {
     <Presence show={show} exitMs={300}>
       <div class={'rl-playerslot app-callslot' + (still.current ? ' rl-playerslot-still' : '')}>
         <div class="rl-playerclip">
-          {mine && gc ? <MyGroupPlate v={gc} /> : lastSummary.current ? <JoinPlate chatId={chatId} s={lastSummary.current} /> : null}
+          {mine && gc ? <MyGroupPlate v={gc} /> : summary || !plan ? (lastSummary.current ? <JoinPlate chatId={chatId} s={lastSummary.current} /> : null) : <PlanPlate chatId={chatId} plan={plan} />}
         </div>
       </div>
     </Presence>
+  );
+}
+
+/** Запланированный звонок: «Созвон · сегодня в 19:00», «Напомнить» (у каждого своё); в срок админу — «Начать». */
+function PlanPlate({ chatId, plan }: { chatId: number; plan: GroupCallPlan }) {
+  const chat = useGlobal((s) => s.chats.find((c) => c.id === chatId));
+  const admin = !!(chat?.me as { admin?: { calls?: boolean }; role?: string } | null)?.admin?.calls || (chat?.me as { role?: string } | null)?.role === 'owner';
+  const [remind, setRemind] = useState<boolean | null>(null);
+  const [editing, setEditing] = useState(false);
+  const now = useNow(true);
+  useEffect(() => { let live = true; void fetchPlan(chatId).then((s) => { if (live) setRemind(s.remind); }).catch(() => {}); return () => { live = false; }; }, [chatId, plan.id]);
+  const due = now >= plan.at - 60_000;
+  const toggle = async () => { const want = !remind; setRemind(want); try { setRemind(await setPlanRemind(chatId, want)); } catch { setRemind(!want); } };
+  return (
+    <div class="app-callplate app-gcjoin app-gcplan" role="region" aria-label="Запланированный звонок">
+      <button type="button" class="app-callplate-center app-gcjoin-center" onClick={() => { if (admin) setEditing(true); }} aria-label={admin ? 'Изменить запланированный звонок' : undefined}>
+        <span class="app-gcplan-icon"><Icon name="calendar" size={20} /></span>
+        <b>{plan.title || 'Звонок'}</b>
+        <span>{due ? 'должен начаться' : whenText(plan.at, now)}</span>
+      </button>
+      {due && admin
+        ? <button type="button" class="app-callplate-side app-gcjoin-btn" onClick={() => void startGroupCall(chatId)}>Начать</button>
+        : <button type="button" class={'app-callplate-side app-gcjoin-btn app-gcplan-remind' + (remind ? ' is-on' : '')} aria-pressed={!!remind} disabled={remind === null} onClick={() => void toggle()}>{remind ? 'Напомню' : 'Напомнить'}</button>}
+      {editing ? <CallPlanModal chatId={chatId} plan={plan} onClose={() => setEditing(false)} /> : null}
+    </div>
   );
 }
 
@@ -58,7 +182,7 @@ function JoinPlate({ chatId, s }: { chatId: number; s: GroupCallSummary }) {
     <div class="app-callplate app-gcjoin" role="region" aria-label="Идёт звонок">
       <button type="button" class="app-callplate-center app-gcjoin-center" onClick={() => void joinGroupCall(chatId, s.callId)}>
         <span class="app-gcfaces">{s.faces.map((id) => <Face key={id} userId={id} size={22} />)}</span>
-        <b>Идёт звонок</b>
+        <b>{s.title ? `Идёт звонок · ${s.title}` : 'Идёт звонок'}</b>
         <span>{s.count ? `${s.count} ${plural(s.count)}` : 'пока никого'} · {callClock((now - s.startedAt) / 1000)}</span>
       </button>
       <button type="button" class="app-callplate-side app-gcjoin-btn" onClick={() => void joinGroupCall(chatId, s.callId)}>Войти</button>
@@ -94,11 +218,18 @@ function Face({ userId, size }: { userId: number; size: number }) {
 function GroupCallScreen({ v }: { v: GroupCallView }) {
   const chat = useGlobal((s) => s.chats.find((c) => c.id === v.chatId));
   const meId = useGlobal((s) => s.me?.userId ?? 0);
-  const admin = !!(chat?.me as { admin?: { calls?: boolean } } | null)?.admin?.calls;
+  // управляет звонком: админ группы с правом calls; в звонке без группы — тот, кто его начал
+  const admin = v.chatId ? !!(chat?.me as { admin?: { calls?: boolean }; role?: string } | null)?.admin?.calls || (chat?.me as { role?: string } | null)?.role === 'owner' : v.startedBy === meId;
+  const conference = !v.chatId;
+  const [inviting, setInviting] = useState(false);
+  const [linking, setLinking] = useState(false);
   const [list, setList] = useState(true);
+  const [side, setSide] = useState<'list' | 'chat'>('list');   // правая панель: участники или чат звонка
+  const [reacting, setReacting] = useState(false);
   const [pinned, setPinned] = useState<string | null>(null);
   const [hint, setHint] = useState(false);
-  const title = (chat?.title as string) || 'Группа';
+  const bg = useGlobal((s) => s.prefs.calls.background);
+  const title = conference ? 'Групповой звонок' : (chat?.title as string) || 'Группа';
   const tiles = pinned ? v.members.filter((m) => m.identity === pinned) : v.members;
   const cols = tiles.length <= 1 ? 1 : tiles.length <= 4 ? 2 : 3;
   return (
@@ -106,11 +237,14 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
       <div class="app-call-top">
         <button type="button" class="app-call-icon" aria-label="Свернуть" onClick={() => setGlobal({ groupCallMin: true })}><Icon name="chevronDown" size={24} /></button>
         <div class="app-gcall-title">
-          <b>{title}</b>
+          <b>{v.title || title}</b>
           <span>{v.phase === 'joining' ? 'Подключение…' : v.phase === 'reconnecting' ? 'Переподключение…' : v.phase === 'ended' ? 'Звонок завершён' : `${v.members.length} ${plural(v.members.length)}`}</span>
         </div>
         <div class="app-gcall-topright">
           {v.emoji ? <button type="button" class="app-call-emoji" aria-label="Ключ шифрования" onClick={() => setHint((x) => !x)}>{v.emoji.map((e, i) => <span key={i}>{e}</span>)}</button> : null}
+          {pipKind() && v.phase !== 'ended' ? <button type="button" class="app-call-icon" aria-label="Картинка в картинке" onClick={() => void openGroupPip()}><Icon name="pip" size={22} /></button> : null}
+          {conference && v.phase === 'active' ? <button type="button" class="app-call-icon" aria-label="Позвать в звонок" onClick={() => setInviting(true)}><Icon name="userPlus" size={22} /></button> : null}
+          {(admin || conference) && v.phase === 'active' ? <button type="button" class="app-call-icon" aria-label="Ссылка на звонок" onClick={() => setLinking((x) => !x)}><Icon name="link" size={22} /></button> : null}
           <button type="button" class="app-call-icon" aria-label={list ? 'Скрыть участников' : 'Показать участников'} onClick={() => setList((x) => !x)}><Icon name="users" size={22} /></button>
         </div>
       </div>
@@ -122,22 +256,42 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
           <button type="button" class="app-call-hint-ok" onClick={() => setHint(false)}>Понятно</button>
         </div>
       ) : null}
+      {v.phase === 'active' && (v.members.find((m) => m.me)?.net ?? 3) <= 1 ? <span class="app-call-note app-call-net app-gcall-badnet"><Icon name="signal" size={16} /> Плохое соединение</span> : null}
       <div class={'app-gcall-body' + (list ? ' with-list' : '')}>
         <div class="app-gcall-grid" style={{ '--cols': cols }}>
-          {tiles.map((m) => <Tile key={m.identity} m={m} rev={v.rev} pinned={pinned === m.identity} onPin={() => setPinned((p) => (p === m.identity ? null : m.identity))} />)}
+          {tiles.map((m) => <Tile key={m.identity} m={m} rev={v.rev} pinned={pinned === m.identity} reactions={v.reactions.filter((r) => r.identity === m.identity)} onPin={() => setPinned((p) => (p === m.identity ? null : m.identity))} />)}
         </div>
-        {list ? (
+        {list && side === 'chat' ? <CallChat v={v} /> : list ? (
           <div class="app-gcall-list" aria-label="Участники">
+            {v.requests.length ? <Requests list={v.requests} admin={admin} /> : null}
+            {admin ? <TitleEdit v={v} /> : null}
+            {admin ? (
+              <label class="app-gcall-setting">
+                <input type="checkbox" checked={v.joinMuted} onChange={(e) => void setJoinMuted((e.target as HTMLInputElement).checked)} />
+                <span>Новые участники — без микрофона</span>
+              </label>
+            ) : null}
             {[...v.members].sort((a, b) => (b.hand ?? 0) - (a.hand ?? 0)).map((m) => <Row key={m.identity} m={m} admin={admin && m.userId !== meId} />)}
           </div>
         ) : null}
       </div>
+      {linking ? <LinkPanel admin={admin} onClose={() => setLinking(false)} /> : null}
+      {inviting ? <PeoplePicker title="Позвать в звонок" action="Позвать" exclude={v.members.map((m) => m.userId)} onClose={() => setInviting(false)}
+        onPick={(ids) => { setInviting(false); void inviteToGroupCall(ids); }} /> : null}
+      {reacting ? (
+        <div class="app-gcall-reactbar" role="toolbar" aria-label="Реакции">
+          {CALL_REACTIONS.map((e) => <button key={e} type="button" aria-label={'Реакция ' + e} onClick={() => void sendCallReaction(e)}>{e}</button>)}
+        </div>
+      ) : null}
       <div class="app-call-controls">
+        {v.cam ? <Btn icon="blur" label={bg === 'blur' ? 'Обычный фон' : 'Размыть фон'} on={bg === 'blur'} onClick={() => void setGroupBackground(bg === 'blur' ? 'none' : 'blur')} /> : null}
         <Btn icon={v.cam ? 'video' : 'videoOff'} label={v.cam ? 'Камера' : 'Камера выкл.'} on={v.cam} onClick={() => void toggleGroupCam()} />
         <Btn icon={v.mic ? 'mic' : 'micOff'} label={v.mutedByAdmin && !v.mic ? 'Выключен админом' : v.mic ? 'Микрофон' : 'Микрофон выкл.'} on={v.mic} onClick={() => void toggleGroupMic()} />
         {typeof navigator !== 'undefined' && navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices
           ? <Btn icon="screen" label={v.screen ? 'Остановить показ' : 'Экран'} on={v.screen} onClick={() => void toggleGroupScreen()} /> : null}
         <Btn icon="raiseHand" label={v.hand ? 'Опустить руку' : 'Поднять руку'} on={v.hand} onClick={toggleGroupHand} />
+        <Btn icon="smile" label="Реакция" on={reacting} onClick={() => setReacting((x) => !x)} />
+        <Btn icon="chats" label="Чат" on={list && side === 'chat'} badge={v.chatUnread} onClick={() => { const open = !(list && side === 'chat'); setSide(open ? 'chat' : 'list'); if (open) { setList(true); readCallChat(); } }} />
         <Btn icon="phoneDown" label="Выйти" danger onClick={leaveGroupCall} />
         {admin || v.startedBy === meId ? <Btn icon="close" label="Завершить для всех" danger onClick={() => void endGroupCallForAll()} /> : null}
       </div>
@@ -145,11 +299,12 @@ function GroupCallScreen({ v }: { v: GroupCallView }) {
   );
 }
 
-function Btn({ icon, label, onClick, on, danger }: { icon: string; label: string; onClick: () => void; on?: boolean; danger?: boolean }) {
+function Btn({ icon, label, onClick, on, danger, accept, badge }: { icon: string; label: string; onClick: () => void; on?: boolean; danger?: boolean; accept?: boolean; badge?: number }) {
   return (
     <div class="app-call-btn">
-      <button type="button" class={'app-call-round' + (danger ? ' is-danger' : on === false ? ' is-off' : '')} aria-label={label} aria-pressed={on} onPointerDown={ripple} onClick={onClick}>
+      <button type="button" class={'app-call-round' + (danger ? ' is-danger' : accept ? ' is-accept' : on === false ? ' is-off' : '')} aria-label={badge ? `${label}, новых: ${badge}` : label} aria-pressed={on} onPointerDown={ripple} onClick={onClick}>
         <Icon name={icon} size={26} />
+        {badge ? <span class="app-call-badge" aria-hidden="true">{badge > 99 ? '99+' : badge}</span> : null}
       </button>
       <span>{label}</span>
     </div>
@@ -157,7 +312,7 @@ function Btn({ icon, label, onClick, on, danger }: { icon: string; label: string
 }
 
 /** Плитка: видео (экран — главнее камеры) или аватар; говорящий — с рамкой. */
-function Tile({ m, rev, pinned, onPin }: { m: GroupMemberView; rev: number; pinned: boolean; onPin: () => void }) {
+function Tile({ m, rev, pinned, onPin, reactions }: { m: GroupMemberView; rev: number; pinned: boolean; onPin: () => void; reactions: GroupReaction[] }) {
   const u = useUser(m.userId);
   const meName = useGlobal((s) => s.me?.name ?? '');
   const real = m.me ? meName : String(u?.name ?? '');   // аватар — по настоящему имени, подпись у своей плитки — «Вы»
@@ -178,7 +333,8 @@ function Tile({ m, rev, pinned, onPin }: { m: GroupMemberView; rev: number; pinn
     <button type="button" class={'app-gtile' + (m.speaking ? ' is-speaking' : '') + (hasVideo ? ' has-video' : '') + (pinned ? ' is-pinned' : '')} onClick={onPin} aria-label={name + (pinned ? ' — открепить' : ' — на весь экран')}>
       <video ref={ref} autoplay playsInline muted class={m.me && !m.screen ? 'is-mirror' : ''} />
       {hasVideo ? null : <Avatar name={real} tone={peerTone(m.userId)} size={88} {...avatarPhoto((u?.photo as ProfilePhoto | null) ?? null)} />}
-      <span class="app-gtile-name">{m.muted ? <Icon name="micOff" size={14} /> : null}{m.hand ? <Icon name="raiseHand" size={14} /> : null}{name}</span>
+      {reactions.length ? <span class="app-gtile-reacts" aria-live="polite">{reactions.map((r) => <span key={r.id} class="app-gtile-react">{r.emoji}</span>)}</span> : null}
+      <span class="app-gtile-name">{m.net <= 1 ? <Icon name="signal" size={14} class="app-gtile-net" title="Слабый сигнал" /> : null}{m.muted ? <Icon name="micOff" size={14} /> : null}{m.hand ? <Icon name="raiseHand" size={14} /> : null}{name}</span>
     </button>
   );
 }
@@ -196,10 +352,58 @@ function Row({ m, admin }: { m: GroupMemberView; admin: boolean }) {
       <Icon name={m.hand ? 'raiseHand' : m.muted ? 'micOff' : 'mic'} size={20} />
       {admin ? (
         <span class="app-gcall-row-admin">
-          {!m.mutedByAdmin ? <button type="button" aria-label={`Выключить микрофон: ${name}`} onClick={() => void adminGroupAction('mute', m.userId)}><Icon name="micOff" size={18} /></button> : null}
+          {!m.mutedByAdmin ? <button type="button" aria-label={`Выключить микрофон: ${name}`} onClick={() => void adminGroupAction('mute', m.userId)}><Icon name="micOff" size={18} /></button>
+            : <button type="button" aria-label={`Разрешить говорить: ${name}`} onClick={() => void adminGroupAction('allow', m.userId)}><Icon name="mic" size={18} /></button>}
           <button type="button" aria-label={`Удалить из звонка: ${name}`} onClick={() => void adminGroupAction('kick', m.userId)}><Icon name="userX" size={18} /></button>
         </span>
       ) : null}
     </div>
+  );
+}
+
+/** Чат звонка: только пока идёт звонок, у вошедших позже прошлого нет; шифр — ключом отправителя (как кадры). */
+function CallChat({ v }: { v: GroupCallView }) {
+  const [text, setText] = useState('');
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { readCallChat(); const el = box.current; if (el) el.scrollTop = el.scrollHeight; }, [v.chat.length]);
+  const submit = async (e: Event) => {
+    e.preventDefault();
+    const value = (box.current?.parentElement?.querySelector('input') as HTMLInputElement | null)?.value ?? text;   // Enter раньше перерисовки — берём из поля
+    if (await sendCallChat(value)) setText('');
+  };
+  return (
+    <div class="app-gcall-chat" aria-label="Чат звонка">
+      <p class="app-gcall-chat-note">Сообщения видят только участники и только пока идёт звонок.</p>
+      <div class="app-gcall-chat-list" ref={box} role="log">
+        {v.chat.map((l) => <ChatLine key={l.id} l={l} />)}
+      </div>
+      <form class="app-gcall-chat-form" onSubmit={(e) => void submit(e)}>
+        <input type="text" value={text} maxLength={CALL_CHAT_MAX} placeholder="Сообщение" aria-label="Сообщение в чат звонка" onInput={(e) => setText((e.target as HTMLInputElement).value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.isComposing) void submit(e); }} />
+        <button type="submit" aria-label="Отправить" disabled={!text.trim()}><Icon name="send" size={20} /></button>
+      </form>
+    </div>
+  );
+}
+
+function ChatLine({ l }: { l: GroupCallView['chat'][number] }) {
+  const u = useUser(l.me ? null : l.userId);
+  return (
+    <div class={'app-gcall-line' + (l.me ? ' is-me' : '')}>
+      {l.me ? null : <b>{String(u?.name ?? '')}</b>}
+      <span>{l.text}</span>
+    </div>
+  );
+}
+
+/** Админ: название звонка — сохраняется по Enter и при уходе из поля. */
+function TitleEdit({ v }: { v: GroupCallView }) {
+  const [text, setText] = useState(v.title ?? '');
+  useEffect(() => { setText(v.title ?? ''); }, [v.title]);
+  // значение — из поля: Enter может прийти раньше перерисовки с новым text
+  const save = (el: HTMLInputElement) => { const t = el.value.trim(); if (t !== (v.title ?? '')) void setGroupCallTitle(t); };
+  return (
+    <input class="app-gcall-titleedit" type="text" value={text} maxLength={64} placeholder="Название звонка" aria-label="Название звонка"
+      onInput={(e) => setText((e.target as HTMLInputElement).value)} onBlur={(e) => save(e.target as HTMLInputElement)} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
   );
 }

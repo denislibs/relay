@@ -134,6 +134,7 @@ const SEARCH_MS = 150;   // как zoomFade у Telegram
 
 export function Sidebar() {
   const [menu, setMenu] = useState<HTMLElement | null>(null);   // главное меню: у кнопки ☰
+  const callsUnseen = useGlobal((s) => s.callsUnseen);   // новые пропущенные — бейдж «Звонки» и точка на ☰
   // контекстное меню строки чата (правая кнопка): как в Telegram — у курсора
   const [rowMenu, setRowMenu] = useState<{ id: number; x: number; y: number } | null>(null);
   const onRowMenu = useRef((id: number, x: number, y: number) => setRowMenu({ id, x, y })).current;
@@ -330,7 +331,7 @@ export function Sidebar() {
       embedded
       paged
       // шапка выбора — соседка SidebarHeader: её позиционированный предок — .rl-sidepage, она ровно закрывает 62 px шапки
-      header={<><SidebarHeader onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
+      header={<><SidebarHeader menuDot={callsUnseen > 0} onMenu={(e: MouseEvent) => setMenu(e.currentTarget as HTMLElement)} back={searchOpen} onBack={closeSearch} status={searchStatus ?? undefined} searchId="side-search" value={search} placeholder="Поиск"
         onSearchFocus={openSearch} onSearchKey={(e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); closeSearch(); } }}
         onSearch={(e: Event) => setGlobal({ search: (e.target as HTMLInputElement).value, searchOpen: true })} />{mode.header}</>}
       top={<ChatBanner />}
@@ -352,6 +353,7 @@ export function Sidebar() {
                   { icon: 'account', label: 'Мой профиль', onClick: () => { setMenu(null); void go('settings'); } },
                   { icon: 'bookmark', label: 'Избранное', onClick: () => { setMenu(null); void openSavedChat(); } },
                   { icon: 'contacts', label: 'Контакты', onClick: () => { setMenu(null); void go('contacts'); } },
+                  { icon: 'phone', label: 'Звонки', badge: callsUnseen || undefined, badgeLabel: callsUnseen ? `Пропущенных: ${callsUnseen}` : undefined, onClick: () => { setMenu(null); void go('calls'); } },
                   { icon: 'settings', label: 'Настройки', onClick: () => { setMenu(null); void go('settings'); } },
                   ...(installable ? [{ icon: 'download', label: 'Установить Relay', onClick: () => { setMenu(null); void installApp(); } }] : []),
                   '-',

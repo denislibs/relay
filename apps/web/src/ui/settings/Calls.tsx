@@ -1,3 +1,4 @@
+import { warmBackground } from '../../calls/background';
 import { CheckRow, InfoRow, PanelHeader, RangeRow, Section, SelectRow } from '@relay/ui';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { failureOf, getCamera, getMic, levelMeter, listDevices, canPickSpeaker, type MediaFailure } from '../../calls/media';
@@ -76,7 +77,7 @@ export function Calls() {
   };
   // выбрали другое устройство, пока идёт проверка, — перезапустить на нём
   useEffect(() => { if (micOn) void startMic(); }, [p.mic, p.noise, p.agc]);
-  useEffect(() => { if (camOn) void startCam(); }, [p.camera, p.video]);
+  useEffect(() => { if (camOn) void startCam(); }, [p.camera, p.video, p.background]);
 
   const name = (d: MediaDeviceInfo, i: number, what: string) => d.label || `${what} ${i + 1}`;
   const deviceRow = (key: 'mic' | 'speaker' | 'camera', label: string, what: string) => (
@@ -112,6 +113,9 @@ export function Calls() {
           {/* один <video> всегда в DOM: поток ставится до перерисовки, а кадр показывается после первого кадра камеры */}
           <div class={'app-calls-preview' + (camOn ? ' is-open' : '')}><video ref={video} class={camShown ? 'is-on' : ''} autoplay playsInline muted aria-label="Предпросмотр камеры" /></div>
           <InfoRow icon={camOn ? 'videoOff' : 'video'} title={camOn ? 'Выключить камеру' : 'Показать камеру'} onClick={() => void (camOn ? stopCam() : startCam())} />
+          <SelectRow setting="calls.background" label="Фон" value={p.background}
+            options={[{ value: 'none', label: 'Обычный' }, { value: 'blur', label: 'Размытый' }]}
+            onChange={(v: string | number) => { if (v === 'blur') warmBackground(); setPrefs({ 'calls.background': v }); }} />
           <SelectRow setting="calls.video" label="Качество видео" value={p.video}
             options={[{ value: 'auto', label: 'Обычное' }, { value: 'saver', label: 'Экономия трафика' }, { value: 'high', label: 'Высокое' }]}
             onChange={(v: string | number) => setPrefs({ 'calls.video': v })} />

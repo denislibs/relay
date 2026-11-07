@@ -1,4 +1,5 @@
 import type { ServiceData, ServiceType } from '@relay/protocol';
+import { whenText } from '../schedule';
 import { termText } from '../autoDelete';
 import { callLength, callServiceText } from '../calls/callText';
 
@@ -54,6 +55,8 @@ export function serviceText(type: ServiceType, opts: { data?: ServiceData; body?
     case 'call': return callServiceText(data?.call, mine);
     case 'group_call': return data?.groupCall?.state === 'ended'
       ? 'Звонок завершён' + (data.groupCall.duration ? ` (${callLength(data.groupCall.duration)})` : '')
+      : data?.groupCall?.state === 'scheduled'
+      ? v('запланировали звонок', 'запланировал(а) звонок') + (data.groupCall.title ? ` «${data.groupCall.title}»` : '') + (data.groupCall.at ? ' на ' + whenText(data.groupCall.at, Date.now()) : '')
       : v('начали звонок', 'начал(а) звонок');
     default: return opts.body ?? '';
   }

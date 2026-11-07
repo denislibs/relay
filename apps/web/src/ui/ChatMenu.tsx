@@ -1,3 +1,5 @@
+import type { GroupCallPlan } from '@relay/protocol';
+import { CallPlanModal } from './call/CallPlanModal';
 import { callBack, canCall } from '../calls/callUi';
 // Меню «⋮» в шапке чата — как в Telegram Web A: карточка у кнопки (растёт из правого верхнего угла),
 // пункты по виду чата, разделитель и опасное действие последним, красным.
@@ -43,6 +45,10 @@ export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: 
 
   const [open, setOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  // запланировать звонок — админ группы с «Управлением звонками» (этап 7 docs/plans/2026-11-07-relay-calls-features.md)
+  const callAdmin = chat?.kind === 'group' && !!gMe && (gMe.role === 'owner' || !!(gMe as { admin?: { calls?: boolean } }).admin?.calls);
+  const callPlan = (chat?.groupCallPlan as GroupCallPlan | null | undefined) ?? null;
   const base = useBase();
   // тема чата: в личном — любой из двоих (не служебный, без блокировки), в группе и канале — кто меняет информацию
   const canTheme = !chat?.preview && (saved || (peerId != null && !iBlocked && !user?.blocksMe) || (gMe != null && canManage(gMe)));
@@ -79,6 +85,7 @@ export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: 
       ? { icon: 'bell', label: 'Включить звук', onClick: () => unmuteChat(chatId) }
       : { icon: 'bellOff', label: 'Отключить звук…', onClick: () => setAsk('mute') }]),
     ...(!system && !gInfo?.protected ? [{ icon: 'checkCircle', label: 'Выбрать сообщения', onClick: () => startSelect(chatId, []) }] : []),
+    ...(callAdmin ? [{ icon: 'calendarAdd', label: callPlan ? 'Запланированный звонок' : 'Запланировать звонок', onClick: () => { setOpen(false); setPlanOpen(true); } }] : []),
     ...(canTheme ? [{ icon: 'palette', label: 'Тема чата', onClick: () => { setOpen(false); setThemeOpen(true); } }] : []),
     ...(canTimer ? [{ icon: 'timer', label: chat?.autoDeleteSec ? 'Автоудаление: ' + termText(chat.autoDeleteSec as number) : 'Автоудаление', onClick: () => { setOpen(false); setGlobal({ infoOpen: true, infoGo: 'autoDelete' }); } }] : []),
     ...(peerId ? [iBlocked
@@ -99,6 +106,7 @@ export function ChatMenu({ chatId, title, savedPeer }: { chatId: number; title: 
       <MenuPopover open={open} hover anchor={btn.current?.firstElementChild ?? undefined} placement="bottom-end" label="Действия с чатом"
         items={items} onClose={() => setOpen(false)} onPointerEnter={hover.onPointerEnter} onPointerLeave={hover.onPointerLeave} />
       {dialogs.node}
+      {planOpen ? <CallPlanModal chatId={chatId} plan={callPlan} onClose={() => setPlanOpen(false)} /> : null}
       <Modal open={themeOpen} title="Тема чата" size="slim" onClose={() => setThemeOpen(false)}>
         <p class="rl-mdl-text app-chattheme-hint">{saved ? 'Тема будет на всех ваших устройствах.' : peerId ? 'Тему увидите вы оба.' : 'Тему увидят все участники.'} Светлая или тёмная — как у каждого в настройках.</p>
         <ThemeTiles base={base} selected={(chat?.theme as string | null) ?? null} onPick={(id) => { void setChatTheme(chatId, id); }} />

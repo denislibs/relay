@@ -4,6 +4,9 @@ import { getPreview, normalizeUrl } from './domain/linkPreview';
 import { searchMedia, searchPeople, topPeers } from './domain/globalSearch';
 import { searchChannels } from './domain/channelPreview';
 import { createBus } from './bus';
+import { declineFromPush } from './domain/calls';
+import { listCalls, markCallsSeen, unseenMissed } from './domain/callsList';
+import { cancelGroupCallPlan, getGroupCallPlan, planGroupCall, remindGroupCallPlan } from './domain/groupCalls';
 import { clientIp, devAllowed } from './device';
 import type { Server } from 'bun';
 import { authenticate, clearLegacySessionCookie, clearSessionCookie, createSession, createUser, deleteSession, readSessionToken, sessionCookie, sessionFromToken } from './auth';
@@ -99,7 +102,7 @@ const PRE_PROOF_BYTES = 256 * 1024;
 export const WS_MAX_FRAME = 256 * 1024;
 /** кадров в секунду на сокет */
 const WS_RATE = 100;
-const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
+const API = /^\/(health|me|users|contacts|settings|privacy|blocks|chats|presence|search|uploads|files|push|calls|sessions|session|ws|dev|logout|auth|link-preview|groups|join|sticker-sets|my-stickers|my-gifs|stickers-by-emoji|stickers|reactions|animated-emoji|emoji-groups|maptile|themes)(\/|$)/;
 
 export function createServer(opts: { port: number }): Server {
   // кадры мимо журнала — через Valkey, чтобы дошли до сокетов в любом процессе
@@ -403,6 +406,26 @@ export function createServer(opts: { port: number }): Server {
         }
         const mediaCounts = /^\/chats\/(\d+)\/media\/counts$/.exec(url.pathname);
         if (req.method === 'GET' && mediaCounts) return Response.json(await getChatMediaCounts(userId, Number(mediaCounts[1]), savedPeerParam(url.searchParams.get('savedPeer'))));
+        // запланированный звонок группы: план и «напомнить мне», поставить / снять (админ с правом calls)
+        const callPlan = /^\/groups\/(\d+)\/call-plan(\/remind)?$/.exec(url.pathname);
+        if (callPlan) {
+          const chatId = Number(callPlan[1]);
+          if (callPlan[2] && req.method === 'POST') { const b = (await req.json().catch(() => null)) as { on?: unknown } | null; if (typeof b?.on !== 'boolean') return fail('bad_frame'); return Response.json(await remindGroupCallPlan(userId, chatId, b.on)); }
+          if (!callPlan[2] && req.method === 'GET') return Response.json(await getGroupCallPlan(userId, chatId));
+          if (!callPlan[2] && req.method === 'POST') return Response.json(await planGroupCall(userId, chatId, ((await req.json().catch(() => null)) ?? {}) as { title?: unknown; at?: unknown }));
+          if (!callPlan[2] && req.method === 'DELETE') return Response.json(await cancelGroupCallPlan(userId, chatId));
+        }
+        // список «Звонки»: страницами по (время, id), ?missed=1 — только пропущенные; бейдж — /calls/unseen, открыл список — /calls/seen
+        if (req.method === 'GET' && url.pathname === '/calls') {
+          const m = /^(\d{4}-[0-9T:.\-+Z]+)_(\d+)$/.exec(url.searchParams.get('before') ?? '');
+          if (url.searchParams.has('before') && (!m || Number.isNaN(Date.parse(m[1])))) return fail('bad_frame');
+          return Response.json(await listCalls(userId, { before: m ? { at: m[1], id: Number(m[2]) } : undefined, missed: url.searchParams.get('missed') === '1' }));
+        }
+        if (req.method === 'GET' && url.pathname === '/calls/unseen') return Response.json({ count: await unseenMissed(userId) });
+        if (req.method === 'POST' && url.pathname === '/calls/seen') return Response.json(await markCallsSeen(userId));
+        // «Отклонить» в уведомлении о звонке (service worker): вкладок нет — WebSocket открыть негде
+        const callDecline = /^\/calls\/([0-9a-f-]{36})\/decline$/.exec(url.pathname);
+        if (callDecline && req.method === 'POST') return Response.json(await declineFromPush(publish, userId, callDecline[1]));
         if (url.pathname === '/push/subscription' && (req.method === 'POST' || req.method === 'DELETE')) {
           const body = (await req.json().catch(() => null)) as SubscriptionInput | null;
           if (typeof body?.endpoint !== 'string') return fail('bad_frame');

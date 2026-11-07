@@ -1236,7 +1236,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-stkset-gap { width: 40px; }
 .app-stkset-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 4px 12px 88px; overflow-y: auto; overscroll-behavior: contain; }
 .app-stkset-cell { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; border-radius: 12px; }
-.app-stkset-cell:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.app-stkset-cell:hover { background: var(--hover); }
 .app-stkset-pill { position: absolute; left: 16px; right: 16px; bottom: 16px; height: 50px; border: 0; border-radius: 25px; background: var(--brand-strong); color: #fff; font: 600 15px/1 var(--font-sans); letter-spacing: .02em; box-shadow: 0 4px 16px rgba(0,0,0,.18); cursor: pointer; transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur-fast); }
 .app-stkset-pill:active { transform: scale(.98); }
 .app-stkset-pill:disabled { opacity: .6; cursor: default; }
@@ -1402,7 +1402,7 @@ html[data-anim="0"] :is(.app-hero, .app-hero-photo, .app-hero-info, .app-hero-na
 .app-stkrow-btn:disabled { opacity: .7; }
 .app-stkrow-strip { display: grid; grid-template-columns: repeat(5, 1fr); height: 72px; margin-top: 6px; }
 .app-stkrow-cell { display: flex; align-items: center; justify-content: center; margin: 0 2px; border-radius: 16px; transition: background-color var(--dur-fast); }
-.app-stkrow-cell:hover { background: var(--hover, rgba(127,127,127,.08)); }
+.app-stkrow-cell:hover { background: var(--hover); }
 .app-stkrow-skel { cursor: default; animation: none; }
 .app-stkrow-skel .app-stkrow-title i { display: block; height: 14px; border-radius: 7px; background: var(--hover, rgba(127,127,127,.12)); }
 .app-stkrow-skel .app-stkrow-title i:first-child { width: 45%; margin: 4px 0 8px; }
@@ -1873,3 +1873,80 @@ span.app-log-ava { cursor: default; }
 .app-gcjoin-btn:hover { background: #4d9f4c; }
 .app-action-gcall { align-items: center; gap: 8px; }
 .app-action-gcall > button { padding: 3px 12px; border: 0; border-radius: 15px; background: #54b655; color: #fff; font: 600 13px/20px var(--font-sans); cursor: pointer; }
+
+/* «Звонки» (ui/calls/Calls.tsx): строка — как строка чата (72 px, аватар 48), справа кнопка «перезвонить» */
+.app-calls .app-listwrap { padding: 4px 8px; }
+.app-callrow { display: flex; align-items: center; gap: 4px; }
+.app-callrow-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 8px; border: 0; border-radius: 12px; background: transparent; color: inherit; text-align: left; cursor: pointer; position: relative; overflow: hidden; }
+.app-callrow-main:hover { background: var(--hover); }
+.app-callrow-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.app-callrow-name { font: 600 15px/20px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-callrow-name.is-missed { color: var(--danger); }
+.app-callrow-sub { display: flex; align-items: center; gap: 4px; font: 400 14px/18px var(--font-sans); color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-callrow-time { align-self: flex-start; margin-top: 12px; font: 400 12px/16px var(--font-sans); color: var(--ink-muted); }
+.app-callrow-call { flex: none; color: var(--brand-text, var(--brand)); }
+.app-calls-tail { height: 1px; }
+
+/* «Картинка в картинке» (ui/call/CallPip.tsx): окно Document PiP — видео во всё окно, имя и время сверху, две кнопки снизу */
+.app-pip-body { margin: 0; height: 100vh; overflow: hidden; background: #111418; color: #fff; }
+.app-pip, .app-pip-call { position: relative; width: 100%; height: 100%; display: grid; place-items: center; overflow: hidden; }
+.app-pip-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.app-pip-who { position: absolute; top: 8px; left: 10px; right: 10px; display: flex; flex-direction: column; gap: 1px; text-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.app-pip-who b { font: 600 14px/18px var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.app-pip-who span { font: 400 12px/16px var(--font-sans); opacity: .85; }
+.app-pip-call:not(.has-video) .app-pip-who { position: static; align-items: center; margin-top: 8px; }
+.app-pip-call:not(.has-video) { align-content: center; gap: 4px; }
+.app-pip-controls { position: absolute; bottom: 10px; left: 0; right: 0; display: flex; justify-content: center; gap: 14px; }
+.app-pip-btn { width: 44px; height: 44px; border: 0; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.18); color: #fff; cursor: pointer; backdrop-filter: blur(8px); }
+.app-pip-btn.is-off { background: #fff; color: #111; }
+.app-pip-btn.is-danger { background: var(--danger); color: #fff; }
+
+/* качество связи (calls/quality.ts): плашка на экране звонка и значок на плитке группового */
+.app-call-net { color: #ffd166; }
+.app-gtile-net { color: #ffd166; }
+.app-gcall-badnet { position: absolute; left: 50%; top: 64px; transform: translateX(-50%); z-index: 2; }
+
+/* групповой звонок: реакции, чат, настройка «без микрофона» (этап 6) */
+.app-gcall-reactbar { align-self: center; display: flex; gap: 6px; padding: 6px 10px; border-radius: 24px; background: rgba(0,0,0,.35); backdrop-filter: blur(12px); }
+.app-gcall-reactbar button { width: 40px; height: 40px; border: 0; border-radius: 50%; background: transparent; font-size: 24px; line-height: 40px; cursor: pointer; transition: transform .15s ease; }
+.app-gcall-reactbar button:hover { transform: scale(1.18); background: rgba(255,255,255,.12); }
+.app-gtile-reacts { position: absolute; left: 50%; bottom: 36px; pointer-events: none; }
+.app-gtile-react { position: absolute; left: 0; bottom: 0; font-size: 40px; animation: app-gtile-react 2.6s ease-out forwards; }
+@keyframes app-gtile-react { 0% { transform: translate(-50%, 0) scale(.4); opacity: 0; } 12% { transform: translate(-50%, -10px) scale(1.15); opacity: 1; } 75% { opacity: 1; } 100% { transform: translate(-50%, -120px) scale(1); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .app-gtile-react { animation-duration: 1.2s; animation-name: app-gtile-react-fade; } @keyframes app-gtile-react-fade { from { opacity: 1; transform: translate(-50%, 0); } to { opacity: 0; transform: translate(-50%, 0); } } }
+.app-call-round { position: relative; }
+.app-call-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font: 600 11px/18px var(--font-sans); }
+.app-gcall-setting { display: flex; align-items: center; gap: 8px; padding: 8px 10px; margin-bottom: 4px; border-radius: 12px; background: rgba(255,255,255,.06); font: 400 13px/18px var(--font-sans); cursor: pointer; }
+.app-gcall-chat { min-height: 0; display: flex; flex-direction: column; border-radius: 16px; background: rgba(0,0,0,.2); overflow: hidden; }
+.app-gcall-chat-note { margin: 0; padding: 8px 12px; font: 400 12px/16px var(--font-sans); opacity: .7; }
+.app-gcall-chat-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 10px 8px; }
+.app-gcall-line { align-self: flex-start; max-width: 90%; display: flex; flex-direction: column; padding: 6px 10px; border-radius: 12px; background: rgba(255,255,255,.1); font: 400 14px/19px var(--font-sans); overflow-wrap: anywhere; }
+.app-gcall-line b { font: 600 12px/16px var(--font-sans); opacity: .8; }
+.app-gcall-line.is-me { align-self: flex-end; background: var(--brand); color: #fff; }
+.app-gcall-chat-form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid rgba(255,255,255,.08); }
+.app-gcall-chat-form input { flex: 1; min-width: 0; height: 36px; padding: 0 12px; border: 0; border-radius: 18px; background: rgba(255,255,255,.12); color: inherit; font: 400 14px/20px var(--font-sans); }
+.app-gcall-chat-form button { width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: #fff; cursor: pointer; }
+.app-gcall-chat-form button:disabled { opacity: .4; cursor: default; }
+
+/* запланированный звонок (этап 7): плашка, окно, название звонка у админа */
+.app-gcplan-icon { display: grid; place-items: center; width: 22px; height: 22px; color: #fff; }
+.app-gcplan-remind.is-on { opacity: .75; }
+.app-callplan-note { margin: 12px 0 0; font: 400 13px/18px var(--font-sans); color: var(--ink-muted); }
+.app-gcall-titleedit { height: 34px; margin-bottom: 4px; padding: 0 10px; border: 0; border-radius: 10px; background: rgba(255,255,255,.08); color: inherit; font: 400 13px/18px var(--font-sans); }
+
+/* звонок без группы и ссылки (этап 8): приглашение, ссылка, заявки, выбор людей */
+.app-gcall-invite .app-call-who { margin-top: auto; }
+.app-gcall-invite .app-call-controls { margin-top: auto; }
+.app-gcall-bigicon { width: 120px; height: 120px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,255,255,.12); }
+.app-gcfaces-big { display: flex; gap: 0; }
+.app-gcfaces-big > * + * { margin-left: -14px; }
+.app-gcall-linkpanel { position: absolute; top: 64px; right: 16px; z-index: 5; width: min(340px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 16px; background: rgba(20,22,26,.92); backdrop-filter: blur(16px); box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.app-gcall-linkurl { width: 100%; box-sizing: border-box; }
+.app-gcall-linkbtns { display: flex; flex-wrap: wrap; gap: 6px; }
+.app-gcall-linkbtn { height: 32px; padding: 0 12px; border: 0; border-radius: 16px; background: rgba(255,255,255,.12); color: #fff; font: 500 13px/32px var(--font-sans); cursor: pointer; }
+.app-gcall-linkbtn.is-danger { color: #ff8a8a; }
+.app-gcall-requests { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.app-peoplepick-list { max-height: min(50vh, 420px); overflow: auto; margin-top: 8px; }
+.app-peoplepick-row .rl-check { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+.app-peoplepick-empty { margin: 16px 0; text-align: center; color: var(--ink-muted); }
+.app-callrow-conf { flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--brand-text, var(--brand)); }
