@@ -578,7 +578,8 @@ export type ServerFrame =
   // Пустые items — «перечитай край треда» (события не поместились в уведомление)
   | { op: 'threadPush'; chatId: Id; threadId: Id; items: Update[] }
   | { op: 'ack'; reqId: string; result: Record<string, unknown> }
-  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean }
+  // retryAfter — у flood: секунд до повтора (как FLOOD_WAIT в Telegram; apps/server/src/domain/flood.ts)
+  | { op: 'err'; reqId?: string; code: ErrorCode; retry: boolean; retryAfter?: number }
   | { op: 'poke' }
   | { op: 'presence'; items: PresenceItem[] }
   | { op: 'typing'; chatId: Id; userId: Id }

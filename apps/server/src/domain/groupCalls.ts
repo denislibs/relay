@@ -6,6 +6,7 @@ import { sql } from '../db';
 import { enqueue } from '../jobs/queue';
 import { hit, key, valkey } from '../valkey';
 import { DomainError } from './errors';
+import { limit } from './flood';
 import { can, groupCtx, hasAdmin, type GroupCtx } from './groupRights';
 import { serviceMessage } from './groups';
 import { chatEvent } from './journal';
@@ -136,7 +137,7 @@ export async function currentGroupCall(userId: number, chatId: number): Promise<
 /** Начать звонок в группе. Уже идёт — вернуть его (две кнопки одновременно не создают два звонка). */
 export async function startGroupCall(userId: number, chatId: number): Promise<{ callId: string; started: boolean }> {
   await startCtx(userId, chatId);
-  if ((await hit(`gcallstart:${userId}`, 60)) > 5) throw new DomainError('flood', 'calls', 60);
+  await limit('groupCallStart', userId);
   const id = crypto.randomUUID();
   const now = Date.now();
   // один звонок на группу: SET NX на ключ группы
@@ -478,6 +479,7 @@ const LINKS_PER_MIN = 10;
 async function inviteUsers(publish: Publish, callId: string, from: number, users: number[], fromCall?: string): Promise<number[]> {
   const others = users.filter((u) => u !== from);
   if (!others.length) return [];
+  await limit('groupCallInvite', from);   // каждое приглашение звонит людям
   const ctx = await privacyCtx(sql, others.map((u) => [from, u] as [number, number]));
   const ok = (await sql`select id from users where id = any(${others}::bigint[]) and not system`).map((r) => Number(r.id)).filter((u) => canSee(from, u, 'calls', ctx));
   if (!ok.length) return [];
@@ -494,7 +496,7 @@ async function inviteUsers(publish: Publish, callId: string, from: number, users
 /** Звонок без группы: создатель — я; позванные — сразу в допущенных. Из разговора 1:1 (fromCall) собеседник
  *  обязателен: его клиент войдёт сам и только после этого разговор 1:1 закончится. */
 export async function startConference(publish: Publish, userId: number, f: { invite: number[]; fromCall?: string }): Promise<{ callId: string }> {
-  if ((await hit(`gcallstart:${userId}`, 60)) > 5) throw new DomainError('flood', 'calls', 60);
+  await limit('groupCallStart', userId);
   const id = crypto.randomUUID();
   const now = Date.now();
   await valkey().send('HSET', [callKey(id), 'chatId', '0', 'epoch', '0', 'startedBy', String(userId), 'startedAt', String(now)]);

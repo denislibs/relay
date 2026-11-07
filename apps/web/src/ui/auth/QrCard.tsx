@@ -25,7 +25,7 @@ export function QrCard() {
     async function fresh() {
       const r = await call<{ token: string }>('/auth/qr', {});
       if (!alive.current) return;
-      if (!r.ok) { setError(errorText(r.code)); timer = setTimeout(fresh, 5000); return; }
+      if (!r.ok) { setError(errorText(r.code, r.retryAfter)); timer = setTimeout(fresh, r.code === 'flood' ? (r.retryAfter ?? 60) * 1000 : 5000); return; }
       setError(null);
       current = r.data.token;
       setToken(current);

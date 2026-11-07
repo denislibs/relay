@@ -56,7 +56,7 @@ export function PhoneCard(props: { initial?: string }) {
     setBusy(false);
     if (!r.ok) {
       if (r.code === 'bad_frame') setInvalid(true);
-      else setError(errorText(r.code));
+      else setError(errorText(r.code, r.retryAfter));
       return;
     }
     flow.go({ name: 'code', phone: login, ...r.data, sentAt: Date.now() });

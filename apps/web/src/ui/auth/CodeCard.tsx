@@ -31,14 +31,14 @@ export function CodeCard(props: { card: Extract<Card, { name: 'code' }> }) {
     if (r.ok) { flow.finish(r.data, { phone: card.phone }); return; }
     setBusy(false);
     setCode('');
-    setError(errorText(r.code));
+    setError(errorText(r.code, r.retryAfter));
   }
 
   async function resend() {
     setResending(true);
     const r = await call<{ attemptId: string; via: 'app' | 'none'; length: number; devCode?: string }>('/auth/code', { login: card.phone });
     setResending(false);
-    if (!r.ok) { setError(errorText(r.code)); return; }
+    if (!r.ok) { setError(errorText(r.code, r.retryAfter)); return; }
     // тот же экран, новый код: без перехода карточек
     flow.go({ ...card, ...r.data, sentAt: Date.now() }, { instant: true });
   }

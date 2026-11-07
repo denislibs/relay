@@ -114,7 +114,7 @@ export class HostCore {
           const value = await engine.call(m.action);
           c.port.post({ t: 'result', id: m.id, ok: true, value });
         } catch (err) {
-          c.port.post({ t: 'result', id: m.id, ok: false, error: String((err as Error)?.message ?? err) });
+          c.port.post({ t: 'result', id: m.id, ok: false, error: errorText(err) });
         }
         return;
       }
@@ -191,4 +191,14 @@ export class HostCore {
     c.subs.clear();
     this.clients.delete(c);
   }
+}
+
+/**
+ * Ошибка вызова — строкой через порт: Error — его текст; отказ сервера {code, retryAfter?} — код, у flood с секундами
+ * ожидания: 'flood:12' (страница разбирает floodWait в apps/web/src/flood.ts).
+ */
+export function errorText(err: unknown): string {
+  const e = err as { code?: unknown; retryAfter?: unknown; message?: unknown } | null;
+  if (e && typeof e.code === 'string' && !(err instanceof Error)) return typeof e.retryAfter === 'number' && e.retryAfter > 0 ? `${e.code}:${e.retryAfter}` : e.code;
+  return String(e?.message ?? err);
 }

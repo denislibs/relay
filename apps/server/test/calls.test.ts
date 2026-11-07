@@ -5,11 +5,12 @@ import { expireRing, iceServersFor } from '../src/domain/calls';
 import { writeRule } from '../src/domain/privacy';
 import { createServer } from '../src/http';
 import { nextFrame, resetDb } from './helpers';
+import { LIMITS, setLimit } from '../src/domain/flood';
 
 // звонки 1:1: сервер решает, кто принял, кто занят, когда истекло; сигналинг пересылает только между сессиями звонка
 const s = createServer({ port: 0 });
 afterAll(() => s.stop(true));
-beforeEach(resetDb);
+beforeEach(async () => { setLimit(); await resetDb(); });
 const base = `http://localhost:${s.port}`;
 type Login = { userId: number; token: string };
 const login = async (name: string) => (await (await fetch(`${base}/dev/login`, { method: 'POST', body: JSON.stringify({ name }) })).json()) as Login;
@@ -175,6 +176,7 @@ test('privacy «who can call me» and blocks give the same «unavailable»; grou
   const wc = await connect(c.token);
   const cc = await direct(c, b);
   const results = [];
+  setLimit('callRing', LIMITS.callRing);   // лимиты в тестах выключены (setup.ts) — этот проверяет звонки
   for (let i = 0; i < 12; i++) results.push((await call(wc, { op: 'callRequest', callId: crypto.randomUUID(), chatId: cc, video: false, commit: COMMIT, tab: 'tabcccccc' })).reason);
   expect(results.slice(-2)).toEqual(['flood', 'flood']);
   wa.close(); wb.close(); wa2.close(); wc.close();

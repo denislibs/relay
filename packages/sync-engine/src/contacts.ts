@@ -315,6 +315,8 @@ export class Contacts {
           res = await (this.h.fetch ?? fetch)(`${this.h.httpBase}/users/resolve`, { method: 'POST', headers: { 'content-type': 'application/json', ...(this.h.headers ?? {}) }, credentials: 'include', body: JSON.stringify({ query: a.query }) });
         } catch { return { offline: true }; }
         if (res.status === 404) return { notFound: true };
+        // слишком часто (lookup, apps/server/src/domain/flood.ts): секунды до повтора
+        if (res.status === 429) return { flood: Number(((await res.json().catch(() => null)) as { retryAfter?: unknown } | null)?.retryAfter ?? res.headers.get('retry-after')) || 0 };
         if (!res.ok) return { offline: true };
         const u = (await res.json()) as PublicUser;
         this.h.store.profile.applyUser(u);   // добавление по id покажет имя и @username сразу

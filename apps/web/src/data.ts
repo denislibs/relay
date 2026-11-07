@@ -35,6 +35,7 @@ import { compressVideo, type VideoQuality } from './media/compressVideo';
 import { isOwnChannelPost, postCopyChannel } from './channelText';
 import { onLaunch } from './pwa';
 import { baseOf, findTarget, hashFor, parseHash, positionKey, sameTarget, toTarget, type StackTarget } from './stackTarget';
+import { floodText, floodWait, httpWait, waitText } from './flood';
 
 declare const __BUILD__: string;
 declare const __DEV__: boolean;
@@ -128,7 +129,7 @@ export function startData(me: Me, fromUrl = true): void {
       .catch((e) => console.warn('auto-delete files:', String(e)))
       .finally(() => { clearing = false; });
   };
-  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); clearExpiredFiles(s.expiredFiles); gifsRevChanged((s as { gifsRev?: number }).gifsRev ?? 0); } });
+  engine.watch({ kind: 'status' }, (p) => { status.apply(p); const s = status.list()[0] as unknown as Status | undefined; if (s) { setGlobal({ status: s }); showPhase(s); toastFloodWait(s.floodUntil); clearExpiredFiles(s.expiredFiles); gifsRevChanged((s as { gifsRev?: number }).gifsRev ?? 0); } });
   const uploads = new Mirror();
   engine.watch({ kind: 'uploads' }, (p) => { uploads.apply(p); setGlobal({ uploads: uploads.list() as unknown as UploadItem[] }); });
   // закрытие вкладки, пока файл грузится: как в Telegram, спросим (очередь переживёт перезагрузку, но незагруженное придётся догружать)
@@ -334,6 +335,17 @@ function closeSession(key: string): void {
   sessions.delete(key);
   // кадр снимают из стека после закрытия ленты: превью проверяем, когда стек уже обновлён
   queueMicrotask(() => releasePreview(s.chatId));
+}
+
+/**
+ * Сервер попросил подождать с отправкой (flood, FLOOD_WAIT): сообщения остаются «отправляются» и уйдут сами,
+ * когда срок выйдет (движок, floodWait). Тост — один раз на каждый новый срок.
+ */
+let floodToasted = 0;
+function toastFloodWait(until: number | undefined): void {
+  if (!until || until === floodToasted) return;
+  floodToasted = until;
+  showToast(`Слишком много сообщений подряд — остальные уйдут ${waitText((until - Date.now()) / 1000)}`, 4000);
 }
 
 /** Отказ сервера в загрузке по пределам (apps/server/src/domain/uploadLimits.ts): сообщение — «не отправлено», причина — тостом. */
@@ -1338,7 +1350,10 @@ export function deleteMessage(chatId: number, id: number): Promise<unknown> { re
 /** Автоудаление чата: операция движка (переживает офлайн, значение видно сразу). */
 export function setChatAutoDelete(chatId: number, sec: number | null): Promise<unknown> { return engine.call({ type: 'setAutoDelete', chatId, sec }); }
 /** Реакция (null — снять). У себя применяется сразу. */
-export function react(chatId: number, id: number, emoji: string | null): void { engine.call({ type: 'react', chatId, id, emoji }).catch(() => {}); }
+export function react(chatId: number, id: number, emoji: string | null): void {
+  // реакция уже откатилась в ленте (движок); flood — объяснить, остальное (сеть, не участник) — молча, как было
+  engine.call({ type: 'react', chatId, id, emoji }).catch((e) => { const w = floodWait(e); if (w != null) showToast(floodText(w, 'Слишком много реакций')); });
+}
 
 /* ---------- чек-листы ---------- */
 export async function sendTodo(chatId: number, todo: TodoInput, replyToId: ReplyRef = null): Promise<void> {
@@ -1455,6 +1470,7 @@ export async function createDirectChat(peerId: number, hint?: PeerHint): Promise
   // существующая личная переписка или новая (сервер не создаёт вторую на ту же пару)
   const { id: userId, ...access } = ref;
   const res = await fetch('/chats/direct', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ userId, ...access }) });
+  if (res.status === 429) throw new Error(floodText(await httpWait(res), 'Слишком много новых чатов'));
   if (!res.ok) throw new Error(res.status === 401 ? 'Сессия истекла' : res.status === 404 ? 'Написать этому человеку нельзя' : 'Не удалось создать чат');
   const { id } = (await res.json()) as { id: number };
   await engine.call({ type: 'refreshChats' });
@@ -1468,6 +1484,7 @@ export async function createGroup(title: string, memberIds: number[], channel?: 
   if (missing.length) throw new Error('Кого-то из выбранных нельзя добавить в группу');
   // канал: {kind: 'channel'}, без участников — подписчиков добавляют следующим шагом (как в Telegram)
   const res = await fetch('/chats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(channel ? { kind: 'channel', title, about: channel.about, members } : { title, members }) });
+  if (res.status === 429) throw new Error(floodText(await httpWait(res), channel ? 'Слишком много новых каналов' : 'Слишком много новых групп'));
   if (!res.ok) {
     const code = ((await res.json().catch(() => ({}))) as { code?: string }).code;
     throw new Error(code === 'blocked' ? 'Кого-то из выбранных нельзя добавить в группу'

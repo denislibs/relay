@@ -38,7 +38,8 @@ import { shiftCounts, ViewCounter } from './channel';
 export interface WatchHandle { update(q: Query): void; close(): void }
 
 interface Watcher { id: number; q: Query; cb: (p: Patch) => void; prev: Result | null; force: boolean; gated: boolean; stat?: SubStat; cursor?: number; first?: number }
-type ReqError = { code: string; retry: boolean };
+/** retryAfter — у flood: секунд до повтора (FLOOD_WAIT, apps/server/src/domain/flood.ts) */
+type ReqError = { code: string; retry: boolean; retryAfter?: number };
 /** Операция над отложенным: одна на строку (правки схлопываются, удаление заменяет правки). */
 const OP_SCHEDULED = 'scheduled:';
 
@@ -231,6 +232,7 @@ export class Engine {
         if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
         if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
         if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+        if (this.floodTimer) { clearTimeout(this.floodTimer); this.floodTimer = null; this.floodUntil = 0; }
         if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
         if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
         for (const t of this.typingTimers.values()) clearTimeout(t);
@@ -305,6 +307,7 @@ export class Engine {
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+    if (this.floodTimer) { clearTimeout(this.floodTimer); this.floodTimer = null; this.floodUntil = 0; }
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     if (this.safetyTimer) { clearInterval(this.safetyTimer); this.safetyTimer = null; }
@@ -376,6 +379,7 @@ export class Engine {
     if (this.frameTimer) { clearTimeout(this.frameTimer); this.frameTimer = null; }
     if (this.readTimer) { clearTimeout(this.readTimer); this.readTimer = null; }
     if (this.outboxTimer) { clearTimeout(this.outboxTimer); this.outboxTimer = null; }
+    if (this.floodTimer) { clearTimeout(this.floodTimer); this.floodTimer = null; this.floodUntil = 0; }
     if (this.evictTimer) { clearTimeout(this.evictTimer); this.evictTimer = null; }
     if (this.expiryTimer) { clearTimeout(this.expiryTimer); this.expiryTimer = null; }
     this.watchers.clear();
@@ -570,6 +574,7 @@ export class Engine {
       synced: this.ready,
       syncing: this.syncing,
       outbox: [...this.store.outbox.values()].filter((o) => !o.failed).length,
+      floodUntil: this.floodUntil,   // сервер попросил подождать (flood): очередь отправки стоит до этого времени (мс), 0 — нет
       failed: [...this.store.outbox.values()].filter((o) => o.failed).length,
       ...this.session.status(),
       sessionsRev: this.store.sessionsRev,
@@ -1889,12 +1894,13 @@ export class Engine {
       case 'err': {
         const id = f.reqId;
         if (!id) return;
-        if (f.op === 'err') { const cw = this.chatWaiters.get(id); if (cw) { cw.reject({ code: f.code, retry: f.retry }); return; } }
+        const fail: ReqError | null = f.op === 'err' ? { code: f.code, retry: f.retry, ...(f.retryAfter ? { retryAfter: f.retryAfter } : {}) } : null;
+        if (fail) { const cw = this.chatWaiters.get(id); if (cw) { cw.reject(fail); return; } }
         const p = this.pending.get(id);
         if (!p) return;
         this.pending.delete(id);
         if (f.op === 'ack') p.resolve(f.result);
-        else p.reject({ code: f.code, retry: f.retry });
+        else p.reject(fail!);
         return;
       }
       case 'poke':
@@ -2722,6 +2728,15 @@ export class Engine {
   /** Повтор очереди при живой сети (5xx, истёкшая ссылка на загрузку): 1, 2, 5, 10, 30 с. Обрыв сети ждёт переподключения. */
   private outboxTimer: ReturnType<typeof setTimeout> | null = null;
   private outboxAttempt = 0;
+  /** FLOOD_WAIT: до этого времени (мс) очередь отправки не шлёт — сообщения остаются «отправляются», не «не отправлено». */
+  private floodUntil = 0;
+  private floodTimer: ReturnType<typeof setTimeout> | null = null;
+  private floodWait(sec: number): void {
+    this.floodUntil = Date.now() + sec * 1000;
+    if (this.floodTimer) clearTimeout(this.floodTimer);
+    this.floodTimer = setTimeout(() => { this.floodTimer = null; this.floodUntil = 0; this.pushStatus(); this.pumpOutbox(); }, sec * 1000);
+    this.pushStatus();
+  }
   private retryOutboxLater(): void {
     if (this.outboxTimer || this.closed) return;
     const ms = [1000, 2000, 5000, 10_000, 30_000][Math.min(this.outboxAttempt++, 4)];
@@ -2743,6 +2758,7 @@ export class Engine {
   private pumpOutbox(): void {
     if (this.resetting || !this.online || !this.ready) return;
     this.startUpload();
+    if (this.floodUntil) return;   // сервер просил подождать — продолжит таймер floodWait
     if (this.pumping) return;
     this.pumping = true;
     this.run(async () => {
@@ -2783,6 +2799,8 @@ export class Engine {
             if ((e as ReqError).code === 'schedule_past' && this.store.outbox.has(next.clientId)) this.promoteToSend(next.clientId);
             // цитируемый кусок убрали, пока ответ ждал сети: ответ уходит без фрагмента (тем же циклом), а не висит с ошибкой
             else if ((e as ReqError).code === 'quote_gone' && this.store.dropQuote(next.clientId)) { /* следующий круг отправит его снова */ }
+            // слишком часто (FLOOD_WAIT): не отказ — ждём, сколько сказал сервер, и шлём дальше в том же порядке
+            else if ((e as ReqError).code === 'flood' && (e as ReqError).retryAfter) { this.floodWait((e as ReqError).retryAfter!); break; }
             // отказ сервера: код остаётся у сообщения (blocked — интерфейс заменит поле ввода плашкой)
             else if ((e as ReqError).retry === false) this.store.fail(next.clientId, (e as ReqError).code);
             else { if ((e as ReqError).code !== 'offline') this.retryOutboxLater(); break; } // сеть — дождёмся переподключения, порядок сохранится
@@ -3165,6 +3183,12 @@ export class Engine {
     const headers = init?.body ? { ...this.cfg.headers, 'content-type': 'application/json' } : this.cfg.headers;
     const res = await this.dev.fetch(this.cfg.httpBase + path, { headers, credentials: 'include', ...(init ?? {}) });
     if (this.session.unauthorized(res.status)) throw { code: 'offline', retry: false } satisfies ReqError;   // сеанс завершён — не ошибка движка
+    if (res.status === 429) {
+      // слишком часто (nginx или сервер): {code: 'flood', retryAfter} — вызвавший покажет «подождите»
+      const j = (await res.json().catch(() => null)) as { retryAfter?: unknown } | null;
+      const after = Number(j?.retryAfter ?? res.headers.get('retry-after')) || 5;
+      throw { code: 'flood', retry: true, retryAfter: after } satisfies ReqError;
+    }
     if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
     return (await res.json()) as T;
   }

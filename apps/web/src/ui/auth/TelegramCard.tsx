@@ -24,7 +24,7 @@ export function TelegramCard() {
     async function fresh() {
       const r = await call<{ token: string; url: string }>('/auth/telegram', {});
       if (!alive.current) return;
-      if (!r.ok) { setError(errorText(r.code)); if (r.code !== 'flood') timer = setTimeout(fresh, 5000); return; }
+      if (!r.ok) { setError(errorText(r.code, r.retryAfter)); if (r.code !== 'flood') timer = setTimeout(fresh, 5000); return; }
       current.current = r.data.token;
       setLink(r.data);
       setOpened(false);

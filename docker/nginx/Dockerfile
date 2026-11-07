@@ -24,4 +24,6 @@ FROM nginx:${NGINX}-alpine
 RUN apk add --no-cache brotli-libs
 COPY --from=brotli /build/nginx-*/objs/ngx_http_brotli_filter_module.so /build/nginx-*/objs/ngx_http_brotli_static_module.so /etc/nginx/modules/
 COPY nginx.conf /etc/nginx/nginx.conf
+# антифлуд (docs/protection.md): подключаются из production.conf; dev.conf их не использует
+COPY limits/ /etc/nginx/snippets/limits/
 CMD ["nginx", "-g", "daemon off;"]

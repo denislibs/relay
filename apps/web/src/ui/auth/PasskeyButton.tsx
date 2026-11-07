@@ -31,7 +31,7 @@ export function PasskeyButton(props: { disabled?: boolean }) {
       const response = await startAuthentication({ optionsJSON: opts.options });
       const r = await call<Step>('/auth/passkey/finish', { id: opts.id, response });
       if (r.ok) { flow.finish(r.data); return; }
-      setError(errorText(r.code));
+      setError(errorText(r.code, r.retryAfter));
     } catch {
       // окно браузера закрыли или ключа нет — без тревожного текста
       setError(null);
