@@ -10,6 +10,7 @@ import { audioConstraints, failureOf, videoConstraints } from './media';
 import { blurProcessor } from './background';
 import type { NetLevel } from './quality';
 import { soundSink, sounds } from './sounds';
+import { errorReporter } from '../errorReport';
 
 /**
  * Групповой звонок на странице (docs/plans/2026-11-07-relay-group-calls.md). Медиа — комната LiveKit (livekit-client,
@@ -274,6 +275,7 @@ export async function joinGroupCall(chatId: number, callId: string, o: { moving?
     if (a.view.mutedByAdmin) view({ mic: false });
   } catch (e) {
     console.warn('livekit connect:', e);
+    errorReporter.report('groupCall', `livekit connect: ${(e as Error)?.name ?? 'Error'}: ${(e as Error)?.message ?? String(e)}`, (e as Error)?.stack);
     toast('Не удалось подключиться к звонку');
     return finish(a, 'failed');
   }

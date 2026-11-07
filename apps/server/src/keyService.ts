@@ -66,7 +66,13 @@ export function createKeyService(o: KeyServiceOptions) {
     ...(tls ? { tls } : {}),
     async fetch(req) {
       const url = new URL(req.url);
-      const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
+      // без токена: только «жив» и «готов» (Vault не запечатан) — для /ready сервера, healthcheck и тревоги
+      if (req.method === 'GET' && url.pathname === '/health') return Response.json({ ok: true });
+      if (req.method === 'GET' && url.pathname === '/ready') {
+        const ok = await Promise.resolve().then(() => kms().ready?.() ?? true).catch(() => false);
+        return Response.json({ ok }, { status: ok ? 200 : 503 });
+      }
+      const token =/^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
       const client = token ? o.tokens.get(token) : undefined;
       if (!client) { audit({ denied: url.pathname, reason: 'token' }); return new Response('unauthorized', { status: 401 }); }
       if (req.method === 'GET' && url.pathname === '/info') return Response.json({ kekId: kms().id });

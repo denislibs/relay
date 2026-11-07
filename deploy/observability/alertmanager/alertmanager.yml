@@ -1,0 +1,28 @@
+# Тревоги → владельцу в Telegram тем же ботом, что и коды входа (docs/observability.md, «Тревоги»).
+# __TELEGRAM_OWNER_CHAT_ID__ и файл токена подставляет команда запуска сервиса (deploy/docker-compose.observability.yml).
+route:
+  receiver: owner
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+# критичная тревога глушит предупреждение о том же (пример: OpenBao запечатан → «зависимость недоступна»)
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname]
+
+receivers:
+  - name: owner
+    telegram_configs:
+      - bot_token_file: /run/am/bot_token
+        chat_id: __TELEGRAM_OWNER_CHAT_ID__
+        parse_mode: HTML
+        send_resolved: true
+        disable_notifications: false
+        message: |-
+          {{ if eq .Status "firing" }}Тревога{{ else }}Прошло{{ end }}: <b>{{ .CommonLabels.alertname }}</b>
+          {{ range .Alerts }}{{ .Annotations.summary }}
+          {{ if .Annotations.action }}Что делать: {{ .Annotations.action }}
+          {{ end }}{{ end }}Подробно: docs/observability.md

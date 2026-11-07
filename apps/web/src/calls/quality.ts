@@ -54,3 +54,16 @@ export function sampleOf(stats: Iterable<Stat>, prev: { lost: number; recv: numb
   const recvLoss = dl + dr > 0 ? dl / (dl + dr) : 0;
   return { loss: Math.max(recvLoss, sendLoss), rtt, jitter };
 }
+
+/** Каким путём идёт медиа: выбранная пара кандидатов, хоть один конец — relay (TURN). null — браузер не сказал. */
+export function pathOf(stats: { forEach(fn: (r: Record<string, unknown>) => void): void; get(id: string): unknown }): 'direct' | 'relay' | null {
+  let pairId = null as string | null;
+  stats.forEach((r) => { if (r.type === 'transport' && typeof r.selectedCandidatePairId === 'string') pairId = r.selectedCandidatePairId; });
+  if (!pairId) stats.forEach((r) => { if (r.type === 'candidate-pair' && r.nominated && r.state === 'succeeded') pairId ??= r.id as string; });
+  const pair = pairId ? stats.get(pairId) as Record<string, unknown> | undefined : undefined;
+  if (!pair) return null;
+  const local = stats.get(String(pair.localCandidateId)) as Record<string, unknown> | undefined;
+  const remote = stats.get(String(pair.remoteCandidateId)) as Record<string, unknown> | undefined;
+  if (!local && !remote) return null;
+  return local?.candidateType === 'relay' || remote?.candidateType === 'relay' ? 'relay' : 'direct';
+}

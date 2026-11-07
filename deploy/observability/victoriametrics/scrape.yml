@@ -1,0 +1,51 @@
+# Цели опроса VictoriaMetrics (deploy/docker-compose.observability.yml). Имена — сервисы compose: DNS Docker
+# отдаёт все реплики сервиса (docker compose up --scale server=2) — dns_sd опрашивает каждую.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  # server и worker: внутренний порт METRICS_PORT (obs/server.ts); у каждой серии своя метка build
+  - job_name: server
+    dns_sd_configs: [{ names: [server], type: A, port: 9091 }]
+  - job_name: worker
+    dns_sd_configs: [{ names: [worker], type: A, port: 9091 }]
+
+  # TURN 1:1 звонков: turnserver.conf → prometheus (сессии и трафик релея)
+  - job_name: coturn
+    static_configs: [{ targets: ["turn:9641"] }]
+    scrape_interval: 30s
+
+  # LiveKit групповых звонков: livekit.yaml → prometheus_port
+  - job_name: livekit
+    static_configs: [{ targets: ["livekit:6789"] }]
+    scrape_interval: 30s
+
+  - job_name: node
+    static_configs: [{ targets: ["node-exporter:9100"] }]
+    scrape_interval: 30s
+
+  # контейнеры: оставляем только ряды с именем сервиса compose (остальное cAdvisor — шум на этом хосте)
+  - job_name: cadvisor
+    static_configs: [{ targets: ["cadvisor:8080"] }]
+    scrape_interval: 30s
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: (.+)
+        target_label: service
+      - source_labels: [service]
+        regex: ""
+        action: drop
+      # id и name оставляем: без них ряды разных cgroup одного сервиса слились бы в один
+      - regex: container_label_com_docker_compose_service|image
+        action: labeldrop
+
+  - job_name: victoriametrics
+    static_configs: [{ targets: ["127.0.0.1:8428"] }]
+    scrape_interval: 60s
+  - job_name: vmalert
+    static_configs: [{ targets: ["vmalert:8880"] }]
+    scrape_interval: 60s
+  - job_name: alertmanager
+    static_configs: [{ targets: ["alertmanager:9093"] }]
+    scrape_interval: 60s
