@@ -108,3 +108,55 @@ groups:
         annotations:
           summary: "Зомби-процессов на хосте: {{ $value }}"
           action: "ps -eo ppid,stat | awk '$2 ~ /^Z/ {print $1}' | sort | uniq -c — чей родитель; контейнеру — init: true, перезапустить его."
+
+      # --- тихие поломки (deploy/host-metrics.sh, deploy/bao-renew.sh → node-exporter, textfile) ---
+      # S3 был нездоров 30 мин молча, и следующий выкат не поднял стек (2026-11-07)
+      - alert: RelayContainerUnhealthy
+        expr: relay_container_healthy == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "Контейнер {{ $labels.name }} нездоров или не запущен"
+          action: "deploy/compose.sh ps; deploy/compose.sh logs --tail=100 {{ $labels.name }}; docker inspect relay-{{ $labels.name }}-1 --format '{{`{{json .State.Health}}`}}'. Зависящие от него сервисы не поднимутся при выкате."
+      - alert: RelayContainerRestarting
+        expr: increase(relay_container_restarts[15m]) > 2
+        labels: { severity: warning }
+        annotations:
+          summary: "Контейнер {{ $labels.name }} перезапускается по кругу"
+          action: "deploy/compose.sh logs --tail=200 {{ $labels.name }} — почему падает (память, конфиг, зависимость)."
+      - alert: RelayCertExpiring
+        expr: relay_cert_expiry_timestamp - time() < 21 * 86400
+        for: 1h
+        labels: { severity: warning }
+        annotations:
+          summary: "Сертификат {{ $labels.cert }} истекает через {{ $value | humanizeDuration }}"
+          action: "server — Let's Encrypt: certbot renew, systemctl list-timers | grep certbot; остальные — внутренние: deploy/certs.sh и up -d --force-recreate (docs/deploy.md, «Сертификаты: сроки»)."
+      - alert: RelayBackupStale
+        expr: time() - relay_backup_last_timestamp > 26 * 3600
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Бэкап {{ $labels.part }} не обновлялся {{ $value | humanizeDuration }}"
+          action: "tail -50 /home/deploy/relay-cron.log; руками: cd / && sudo -u deploy /opt/relay/deploy/backup.sh"
+      - alert: RelayBaoTokenExpiring
+        expr: relay_bao_token_ttl_seconds < 7 * 86400
+        for: 1h
+        labels: { severity: critical }
+        annotations:
+          summary: "Токен OpenBao {{ $labels.token }}: осталось {{ $value | humanizeDuration }}"
+          action: "deploy/bao-renew.sh (OpenBao распечатан?). Истёк — сервис ключей не разворачивает ключи чатов; новый токен — через generate-root (docs/deploy.md, 7)."
+      - alert: RelayHostMetricsStale
+        expr: time() - relay_host_metrics_timestamp > 600 or absent(relay_host_metrics_timestamp)
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "deploy/host-metrics.sh не отрабатывает — тревоги о контейнерах, сертификатах и бэкапах слепы"
+          action: "crontab -l -u deploy (строка host-metrics.sh); запустить руками и посмотреть ошибку."
+      # утечка памяти в процессе Relay (норма — сотни МБ: server ~90 МБ, worker ~60 МБ на 2026-11-07)
+      - alert: RelayProcessMemoryHigh
+        expr: max by (job) (relay_process_memory_bytes{kind="rss"}) > 1.5e9
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "{{ $labels.job }}: {{ $value | humanize1024 }} памяти и не отпускает"
+          action: "панель «Память»; растёт с каждым часом — утечка: снять heap snapshot до перезапуска (bun --inspect), потом deploy/compose.sh restart {{ $labels.job }}."

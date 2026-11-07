@@ -102,9 +102,13 @@ services:
       - --no-collector.btrfs
       - --no-collector.xfs
       - --collector.processes   # число процессов по состоянию: тревога RelayZombieProcesses
+      # то, что ломается тихо: здоровье контейнеров, сроки сертификатов и токенов, свежесть бэкапа
+      # (deploy/host-metrics.sh — cron раз в минуту, deploy/bao-renew.sh)
+      - --collector.textfile.directory=/textfile
     pid: host
     volumes:
       - /:/host:ro,rslave
+      - ./deploy/state/metrics:/textfile:ro
     mem_limit: 30m
 
   # память и CPU по контейнерам (метка — имя сервиса compose); лишние группы метрик выключены — так он лёгкий
