@@ -32,11 +32,14 @@ esac
 
 echo
 echo "== certificates (expiry)"
-for f in "$RELAY_DIR/secrets/public/server.pem" "$RELAY_DIR"/secrets/tls/*.pem; do
-  case "$f" in *-key.pem) continue ;; esac
+# только известные сертификаты (вывод status уходит и в лог CI: никаких имён из каталогов)
+for name in public/server tls/ca tls/postgres tls/valkey tls/s3 tls/search tls/keys tls/bao tls/client; do
+  f="$RELAY_DIR/secrets/$name.pem"
   [ -r "$f" ] || continue
-  printf '  %-22s %s\n' "$(basename "$f")" "$(openssl x509 -enddate -noout -in "$f" 2>/dev/null | cut -d= -f2)"
+  printf '  %-22s %s\n' "${name#*/}.pem" "$(openssl x509 -enddate -noout -in "$f" 2>/dev/null | cut -d= -f2)"
 done
+n=$(secrets_unexpected)
+[ "$n" = 0 ] || echo "  WARNING: $n unexpected file(s) in secrets/run (names not shown) — deploy.sh refuses to run"
 
 echo
 echo "== disk"

@@ -47,7 +47,7 @@
 4. **Токен — в файл секрета, id чата — в `.env`** (сервер — [deploy.md](deploy.md)):
 
    ```bash
-   sudo -u deploy sh -c 'cat > /opt/relay/secrets/run/telegram_bot_token'   # вставить токен, Enter, Ctrl-D
+   sudo -u deploy /opt/relay/deploy/set-secret.sh telegram_bot_token   # спросит токен, ввод скрыт
    ```
 
    ```
