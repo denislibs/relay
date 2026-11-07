@@ -70,6 +70,8 @@ preflight() {
   [ -s "$SECRETS_RUN/pg_password" ] || die "$SECRETS_RUN missing: run deploy/make-secrets.sh first (docs/deploy.md)"
   [ -s "$SECRETS_RUN/telegram_bot_token" ] || die "secrets/run/telegram_bot_token is empty (docs/code-delivery.md)"
   [ -s "$SECRETS_RUN/vault_token" ] || die "secrets/run/vault_token is empty: run deploy/bao-init.sh"
+  # посторонний файл в secrets/run — до любых изменений (имя не печатается: им может оказаться сам секрет)
+  [ "$(secrets_unexpected)" = 0 ] || die "unexpected file(s) in secrets/run — names not shown; keep only: $SECRET_NAMES (deploy/set-secret.sh)"
   case "$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")" in
     600 | 400) ;;
     *) die "$ENV_FILE must be chmod 600" ;;
@@ -130,7 +132,9 @@ wait_healthy() {
     [ -z "$pending" ] && { log "healthy: $WAIT_SERVICES"; return 0; }
     if [ "$(date +%s)" -ge "$deadline" ]; then
       log "not healthy after ${HEALTH_TIMEOUT}s:$pending"
-      for s in $pending; do compose logs --tail=40 "${s%%:*}" >&2 || true; done
+      # логи контейнеров — в файл на сервере, не в вывод: вывод deploy.sh виден в публичном логе GitHub Actions
+      (umask 077; for s in $pending; do echo "== ${s%%:*}"; compose logs --tail=80 "${s%%:*}" 2>&1 || true; done > "$STATE_DIR/last-failure.log")
+      log "container logs: deploy/state/last-failure.log on the server (not printed here: CI output is public)"
       return 1
     fi
     sleep 3
@@ -138,20 +142,16 @@ wait_healthy() {
 }
 
 # ни одного значения из secrets/run в `docker inspect` контейнеров стека (окружение, аргументы, метки): секреты —
-# только файлами. Сравнение — grep -F -f по файлу секрета: значения не попадают ни в аргументы, ни в вывод
+# только файлами. Проверка и что можно печатать — lib.sh: secrets_leak_check
 no_secrets_in_inspect() {
   ids=$(compose ps -q)
   [ -n "$ids" ] || return 0
   dump=$(mktemp); chmod 600 "$dump"
   # shellcheck disable=SC2086
   docker inspect $ids > "$dump"
-  leaked=""
-  for f in "$SECRETS_RUN"/*; do
-    [ -s "$f" ] || continue
-    grep -qF -f "$f" "$dump" && leaked="$leaked $(basename "$f")"
-  done
+  rc=0; secrets_leak_check "$dump" || rc=$?
   rm -f "$dump"
-  [ -z "$leaked" ] || { log "SECRET LEAK: value of$leaked is visible in docker inspect — secrets must be files only"; return 1; }
+  [ "$rc" = 0 ] || return 1
   log "docker inspect: no secret values"
 }
 

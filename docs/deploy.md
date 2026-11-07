@@ -115,6 +115,16 @@ Grafana не root — им добавлена группа 1000.
 | запись в GHCR | `GITHUB_TOKEN` запуска (выдаёт GitHub, живёт минуты) |
 | чтение GHCR на сервере (если пакеты приватные) | `~deploy/.docker/config.json` (PAT `read:packages`) |
 
+### Что можно печатать
+
+Вывод `deploy.sh` (и `status` через ключ CI) уходит в **публичный** лог GitHub Actions. Поэтому скрипты печатают
+только фиксированные имена секретов из `SECRET_NAMES` (`deploy/lib.sh`) — никогда значения и никогда имена других
+файлов: по ошибке именем файла может оказаться сам секрет. Посторонний файл в `secrets/run` — отказ выката с числом
+таких файлов, без имён. Логи упавших контейнеров — в `deploy/state/last-failure.log` на сервере, не в вывод.
+Значение секрета вписывается только `deploy/set-secret.sh <имя>` (спрашивает без эха).
+
+Секрет всё-таки попал в лог или в git — **отозвать и выпустить новый** (лог удалить тоже, но он мог уже уйти).
+
 ## Первая настройка сервера## Первая настройка сервера
 
 Всё ниже — один раз. Команды от root, если не сказано иное.
@@ -202,7 +212,8 @@ Meilisearch, токены и ключ аудита сервиса ключей, 
 Вписать руками:
 
 - токен бота — в файл, не в командную строку и не в `.env`:
-  `sudo -u deploy sh -c 'cat > /opt/relay/secrets/run/telegram_bot_token'` (вставить, Enter, Ctrl-D);
+  `sudo -u deploy /opt/relay/deploy/set-secret.sh telegram_bot_token` (спросит токен, ввод скрыт; имя — только из
+  списка, токен в аргументы не вставлять);
 - в `.env` (`sudo -u deploy nano /opt/relay/.env`): `TELEGRAM_OWNER_CHAT_ID` — обязательно
   ([code-delivery.md](code-delivery.md)); для «Войти через Telegram» — `TELEGRAM_LOGIN=1` и `TELEGRAM_BOT_USERNAME`
   (адрес webhook `https://denigram.site/auth/telegram/webhook` и секрет к нему make-secrets уже завёл; worker сам

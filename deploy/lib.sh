@@ -34,8 +34,52 @@ service_health() {
   docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$id" 2>/dev/null || echo missing
 }
 
-# секреты на хосте (docker secrets): deploy/make-secrets.sh, deploy/bao-init.sh
+# секреты на хосте (docker secrets): deploy/make-secrets.sh, deploy/bao-init.sh, deploy/set-secret.sh
 SECRETS_RUN="$RELAY_DIR/secrets/run"
+
+# Все секреты стека — файлы secrets/run/<имя>, и только эти имена. Список один: make-secrets.sh создаёт ровно их,
+# проверки читают только их (tools/ci/deploy.test.ts сверяет со списком secrets: в compose-файлах).
+# ПЕЧАТАТЬ можно только эти имена — и никогда значения или имена других файлов: по ошибке именем файла может
+# оказаться сам секрет (вставили токен вместо имени), а вывод deploy.sh виден в публичном логе GitHub Actions.
+SECRET_NAMES="pg_password valkey_password s3_access_key_id s3_secret_access_key meili_master_key meili_search_key
+key_token_server key_token_worker key_service_tokens key_service_audit_key vault_token bao_backup_token turn_secret
+livekit_api_key livekit_api_secret livekit_keys telegram_bot_token telegram_webhook_secret grafana_admin_password"
+SECRET_NAMES=$(printf '%s' "$SECRET_NAMES" | tr '\n' ' ')   # одной строкой через пробел
+
+is_secret_name() { case " $SECRET_NAMES " in *" $1 "*) [ -n "$1" ] ;; *) return 1 ;; esac; }
+
+# сколько в secrets/run файлов с неизвестными именами (сами имена не выводятся никогда)
+secrets_unexpected() {
+  n=0
+  for f in "$SECRETS_RUN"/* "$SECRETS_RUN"/.[!.]* "$SECRETS_RUN"/..?*; do
+    [ -e "$f" ] || continue
+    is_secret_name "${f##*/}" || n=$((n + 1))
+  done
+  echo "$n"
+}
+
+# secrets_leak_check <файл>: есть ли в файле (вывод docker inspect) значение какого-либо секрета.
+# 0 — нет; 1 — есть (печатаются только имена из SECRET_NAMES); 2 — в secrets/run посторонние файлы (печатается число).
+# Шаблоны — строки файла секрета без пробелов по краям, не короче 8 символов (пустая строка как шаблон grep совпала бы
+# со всем), через временный файл 600: значения не попадают ни в вывод, ни в аргументы.
+secrets_leak_check() {
+  n=$(secrets_unexpected)
+  if [ "$n" -gt 0 ]; then
+    log "unexpected file(s) in secrets/run: $n — names not shown (a name may itself be a secret). Allowed: $SECRET_NAMES"
+    return 2
+  fi
+  pat=$(mktemp); chmod 600 "$pat"
+  leaked=""
+  for name in $SECRET_NAMES; do
+    [ -s "$SECRETS_RUN/$name" ] || continue
+    awk '{ sub(/^[ \t\r]+/, ""); sub(/[ \t\r]+$/, ""); if (length($0) >= 8) print }' "$SECRETS_RUN/$name" > "$pat"
+    [ -s "$pat" ] || continue
+    if grep -qF -f "$pat" "$1"; then leaked="$leaked $name"; fi
+  done
+  rm -f "$pat"
+  if [ -n "$leaked" ]; then log "SECRET LEAK: value of$leaked is visible in docker inspect — secrets must be files only"; return 1; fi
+  return 0
+}
 
 # bao <аргументы> с токеном из переменной shell BAO_T (не окружения): токен уходит в контейнер первой строкой
 # stdin, а не аргументом или `exec -e` — его не видно ни в ps, ни в docker inspect. bao_t_in — то же, и дальше

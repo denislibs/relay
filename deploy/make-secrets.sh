@@ -20,11 +20,12 @@ install -d -m 750 -o "$owner" -g "$gid" "$RELAY_DIR/secrets" "$run"
 made=""
 # secret <имя> <команда, печатающая значение> — только если файла ещё нет
 secret() {
+  is_secret_name "$1" || die "internal: $1 is not in SECRET_NAMES (deploy/lib.sh)"
   f="$run/$1"; shift
   [ -e "$f" ] && return 0
   "$@" > "$f.tmp"
   chown "$owner:$gid" "$f.tmp"; chmod 640 "$f.tmp"; mv "$f.tmp" "$f"
-  made="$made $(basename "$f")"
+  made="$made ${f##*/}"   # имя из SECRET_NAMES — печатать можно
 }
 hex() { openssl rand -hex "$1"; }
 alnum() { openssl rand -base64 64 | tr -dc 'A-Za-z0-9' | cut -c "1-$1"; }
@@ -108,5 +109,7 @@ missing=""
 for k in RELAY_DOMAIN RELAY_TURN_EXTERNAL_IP TELEGRAM_OWNER_CHAT_ID AGE_DATA AGE_KEYS; do
   [ -n "$(env_get "$k")" ] || missing="$missing $k"
 done
-[ -s "$run/telegram_bot_token" ] || missing="$missing secrets/run/telegram_bot_token"
+[ -s "$run/telegram_bot_token" ] || missing="$missing secrets/run/telegram_bot_token (deploy/set-secret.sh telegram_bot_token)"
 [ -z "$missing" ] || log "fill in by hand:$missing"
+n=$(secrets_unexpected)
+[ "$n" = 0 ] || log "WARNING: $n unexpected file(s) in secrets/run (names not shown — remove them; deploy.sh refuses to run)"
