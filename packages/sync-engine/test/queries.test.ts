@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
 import { openDb } from '../src/idb';
 import { computeQuery, diffResults } from '../src/queries';
 import { Store } from '../src/store';
@@ -149,12 +149,15 @@ test('1000 chats: one changed chat gives exactly one upsert; an unchanged base r
   const q = { kind: 'chatList' as const, limit: 2000 };
   const r1 = computeQuery(s, q);
   expect(r1.order).toHaveLength(1000);
-  // неизменная база: ни одного нового элемента и ни одной сериализации — только подписи из версий строк
-  let best = Infinity, r2 = r1;
-  for (let k = 0; k < 3; k++) { const t0 = performance.now(); r2 = computeQuery(s, q); best = Math.min(best, performance.now() - t0); }
+  // неизменная база: ни одного нового элемента и ни одной сериализации — только подписи из версий строк.
+  // Проверяем по счётчикам, а не по миллисекундам (время — в bench/chatlist.bench.ts)
+  const stringify = spyOn(JSON, 'stringify'), version = spyOn(s, 'chatVersion'), rebuilt = spyOn(s, 'scheduledCount');
+  const r2 = computeQuery(s, q);
+  const calls = { stringify: stringify.mock.calls.length, version: version.mock.calls.length, rebuilt: rebuilt.mock.calls.length };
+  stringify.mockRestore(); version.mockRestore(); rebuilt.mockRestore();
+  expect(calls).toEqual({ stringify: 0, version: 1000, rebuilt: 0 });   // подпись — одна версия на строку, chatItem не вызван
   expect(diffResults(r1, r2)).toBeNull();
   for (const k of r1.order) expect(r2.items.get(k)).toBe(r1.items.get(k)!);
-  expect(best).toBeLessThan(2);
 
   s.applyUpdate({ type: 'readOwn', chatId: 1500, upToId: 501 });   // порядок тот же
   s.applyUpdate({ type: 'newMessage', message: msg({ id: 5000, chatId: 1200, senderId: 3200 }) });   // c1200 наверх
